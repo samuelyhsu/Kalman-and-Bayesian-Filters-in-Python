@@ -1,0 +1,243 @@
+=====CELL 0=====
+[目录](./table_of_contents.ipynb)
+=====CELL 1=====
+# 集合卡尔曼滤波器
+=====CELL 4=====
+> 我对集合滤波器并不精通。我为本书实现了一个并让它工作起来，但我在现实中并没有用过。不同的资料使用的这些方程的形式略有不同。如果我实现资料中给出的方程，滤波器就不工作。也可能是我做错了什么。然而，我在网上的各个地方看到有人评论说，他们为了让滤波器工作，做了与我在滤波器中所做的同类的事情。简而言之，我对这个主题理解得不好，但我选择呈现我的无知，而不是对这个主题一笔带过。我希望将来能掌握这个主题，并撰写一个更权威的章节。在本章末尾，我记录了我目前的困惑和问题。无论如何，如果我被这些资料弄糊涂了，也许你也会，所以记录我的困惑可以帮助你避免同样的问题。
+
+
+集合卡尔曼滤波器 (EnKF) 与上一章的无迹卡尔曼滤波器 (UKF) 非常相似。如果你还记得，UKF 使用一组确定性选取的带权重的 sigma 点，让它们通过非线性的状态函数和测量函数。在 sigma 点通过函数之后，我们求这些点的均值和协方差，并把它们用作滤波器新的均值和协方差。它只是真实值的近似，因此是次优的，但在实践中这个滤波器非常准确。它的优点是常常产生比 EKF 更准确的估计，而且不要求你解析地推导状态方程和测量方程的线性化。
+
+集合卡尔曼滤波器的工作方式类似，只是它使用*蒙特卡洛*方法来选取大量的 sigma 点。它起源于地球物理科学，是为了应对对海洋和大气等事物建模所需的非常庞大的状态和系统。*SIAM News* [1] 上有一篇关于它在天气建模中发展的有趣文章。滤波器首先随机生成大量分布在滤波器初始状态周围的点。这个分布与滤波器的协方差 $\mathbf{P}$ 成正比。换句话说，68% 的点在均值的一个标准差之内，95% 在两个标准差之内，依此类推。让我们在二维中看看这一点。我们将使用 `numpy.random.multivariate_normal()` 函数，从均值为 (5, 3)、协方差为
+
+$$\begin{bmatrix}
+32 & 15 \\ 15 & 40
+\end{bmatrix}$$
+
+的多元正态分布中随机创建点。
+
+我绘制了表示两个标准差的协方差椭圆，以说明这些点是如何分布的。
+=====CELL 6=====
+## 算法
+=====CELL 7=====
+正如我已经说过的，滤波器初始化时，会从初始状态 ($\mathbf{x}$) 和协方差 ($\mathbf{P}$) 中抽取大量 sigma 点。从那里开始，算法的进行与 UKF 非常相似。在预测步骤中，sigma 点通过状态转移函数，然后加上一点噪声进行扰动，以考虑过程噪声。在更新步骤中，sigma 点通过测量函数被转换到测量空间，并被小幅扰动以考虑测量噪声。卡尔曼增益根据
+
+我们已经提到了 UKF 和 EnKF 之间的主要区别——UKF 是确定性地选取 sigma 点。上面的算法还隐含了另一个区别。使用 UKF 时，我们在每个预测步骤都生成新的 sigma 点，并在让这些点通过非线性函数之后，用*无迹变换*把它们重新组合成均值和协方差。EnKF 则持续传播最初创建的 sigma 点；我们只需要计算均值和协方差作为滤波器的输出！
+
+让我们看看滤波器的方程。像往常一样，我会省略典型的上下标；我表达的是一个算法，而不是数学函数。这里 $N$ 是 sigma 点的数量，$\chi$ 是 sigma 点的集合。
+=====CELL 8=====
+### 初始化步骤
+=====CELL 9=====
+$$\boldsymbol\chi \sim \mathcal{N}(\mathbf{x}_0, \mathbf{P}_0)$$
+
+这是说要根据滤波器的初始均值和协方差来选取 sigma 点。用代码来写可能像这样
+
+```python
+N = 1000
+sigmas = multivariate_normal(mean=x, cov=P, size=N)
+```
+=====CELL 10=====
+### 预测步骤
+=====CELL 11=====
+$$
+\begin{aligned}
+\boldsymbol\chi &= f(\boldsymbol\chi, \mathbf{u}) + v_Q \\
+\mathbf{x} &= \frac{1}{N} \sum_1^N \boldsymbol\chi
+\end{aligned}
+$$
+
+这简短而扼要，但也许不完全清楚。第一行让所有 sigma 点通过用户提供的状态转移函数，然后加上按 $\mathbf{Q}$ 矩阵分布的一些噪声。在 Python 中我们可能会写成
+
+```python
+for i, s in enumerate(sigmas):
+    sigmas[i] = fx(x=s, dt=0.1, u=0.)
+
+sigmas += multivariate_normal(x, Q, N)
+```
+
+第二行根据这些 sigma 点计算均值。在 Python 中，我们将利用 `numpy.mean` 非常简洁快速地做到这一点。
+
+```python
+x = np.mean(sigmas, axis=0)
+```
+=====CELL 12=====
+我们现在可以选择性地计算均值的协方差。算法不需要计算这个值，但它对分析往往很有用。方程是
+
+$$\mathbf{P} = \frac{1}{N-1}\sum_1^N[\boldsymbol\chi-\mathbf{x}^-][\boldsymbol\chi-\mathbf{x}^-]^\mathsf{T}$$
+
+$\boldsymbol\chi-\mathbf{x}^-$ 是一维向量，所以我们将使用 `numpy.outer` 来计算 $[\boldsymbol\chi-\mathbf{x}^-][\boldsymbol\chi-\mathbf{x}^-]^\mathsf{T}$ 这一项。在 Python 中我们可能会写成
+
+```python
+    P = 0
+    for s in sigmas:
+        P += outer(s-x, s-x)
+    P = P / (N-1)
+```
+=====CELL 13=====
+### 更新步骤
+=====CELL 14=====
+在更新步骤中，我们让 sigma 点通过测量函数，计算这些 sigma 点的均值和协方差，根据协方差计算卡尔曼增益，然后通过用卡尔曼增益缩放残差来更新卡尔曼状态。方程是
+
+$$
+\begin{aligned}
+\boldsymbol\chi_h &= h(\boldsymbol\chi, u)\\
+\mathbf{z}_{mean} &= \frac{1}{N}\sum_1^N \boldsymbol\chi_h \\ \\
+\mathbf{P}_{zz} &= \frac{1}{N-1}\sum_1^N [\boldsymbol\chi_h - \mathbf{z}_{mean}][\boldsymbol\chi_h - \mathbf{z}_{mean}]^\mathsf{T} + \mathbf{R} \\
+\mathbf{P}_{xz} &= \frac{1}{N-1}\sum_1^N [\boldsymbol\chi - \mathbf{x}^-][\boldsymbol\chi_h - \mathbf{z}_{mean}]^\mathsf{T} \\
+\\
+\mathbf{K} &= \mathbf{P}_{xz} \mathbf{P}_{zz}^{-1}\\
+\boldsymbol\chi & = \boldsymbol\chi + \mathbf{K}[\mathbf{z} -\boldsymbol\chi_h + \mathbf{v}_R] \\ \\
+\mathbf{x} &= \frac{1}{N} \sum_1^N \boldsymbol\chi \\
+\mathbf{P} &= \mathbf{P} - \mathbf{KP}_{zz}\mathbf{K}^\mathsf{T}
+\end{aligned}
+$$
+=====CELL 15=====
+这与线性 KF 和 UKF 非常相似。让我们逐行来看。
+
+第一行，
+
+$$\boldsymbol\chi_h = h(\boldsymbol\chi, u),$$
+
+只是让 sigma 点通过测量函数 $h$。我们把得到的点命名为 $\chi_h$，以区别于 sigma 点。在 Python 中我们可以把它写成
+
+```python
+sigmas_h = h(sigmas, u)
+```
+=====CELL 16=====
+下一行计算测量 sigma 点的均值。
+
+$$\mathbf{z}_{mean} = \frac{1}{N}\sum_1^N \boldsymbol\chi_h$$
+
+在 Python 中我们写成
+
+```python
+z_mean = np.mean(sigmas_h, axis=0)
+```
+
+现在我们有了测量 sigma 点的均值，就可以计算每个测量 sigma 点的协方差，以及测量 sigma 点与 sigma 点之间的*互方差*。这由下面这两个方程表示
+
+$$
+\begin{aligned}
+\mathbf{P}_{zz} &= \frac{1}{N-1}\sum_1^N [\boldsymbol\chi_h - \mathbf{z}_{mean}][\boldsymbol\chi_h - \mathbf{z}_{mean}]^\mathsf{T} + \mathbf{R} \\
+\mathbf{P}_{xz} &= \frac{1}{N-1}\sum_1^N [\boldsymbol\chi - \mathbf{x}^-][\boldsymbol\chi_h - \mathbf{z}_{mean}]^\mathsf{T}
+\end{aligned}$$
+
+我们可以用 Python 这样表示
+
+```python
+P_zz = 0
+for sigma in sigmas_h:
+    s = sigma - z_mean
+    P_zz += outer(s, s)
+P_zz = P_zz / (N-1) + R
+
+P_xz = 0
+for i in range(N):
+    P_xz += outer(self.sigmas[i] - self.x, sigmas_h[i] - z_mean)
+P_xz /= N-1
+```
+=====CELL 17=====
+卡尔曼增益的计算很直接：$\mathbf{K} = \mathbf{P}_{xz} \mathbf{P}_{zz}^{-1}$。
+
+在 Python 中是
+
+```python
+K = P_xz @ inv(P_zz)
+```
+=====CELL 18=====
+接下来，我们用下式更新 sigma 点
+
+$$\boldsymbol\chi  = \boldsymbol\chi + \mathbf{K}[\mathbf{z} -\boldsymbol\chi_h + \mathbf{v}_R]$$
+
+这里 $\mathbf{v}_R$ 是我们加到 sigma 点上的扰动。在 Python 中我们可以这样实现
+
+```python
+v_r = multivariate_normal([0]*dim_z, R, N)
+for i in range(N):
+    sigmas[i] += K @ (z + v_r[i] - sigmas_h[i])
+```
+
+
+我们的最后一步是重新计算滤波器的均值和协方差。
+
+```python
+    x = np.mean(sigmas, axis=0)
+    P = self.P - K @ P_zz @ K.T
+```
+=====CELL 19=====
+## 实现与示例
+=====CELL 20=====
+我在 `FilterPy` 库中实现了一个 EnKF。它在许多方面只是个玩具。使用大量 sigma 点进行滤波会使性能非常慢。此外，文献中算法有许多细微的变体。我写这个主要是因为我有兴趣对这个滤波器多了解一点。我没有把它用于真实世界的问题，对于它所适合的大问题，我无法给出使用这个滤波器的建议。因此我会把评论限定在实现一个非常简单的滤波器上。我将用它在一维中跟踪一个物体，并把输出与线性卡尔曼滤波器比较。这是我们在本书中已经设计过许多次的滤波器，所以我会在几乎不加评论的情况下设计它。我们的状态向量将是
+
+$$\mathbf{x} = \begin{bmatrix}x\\ \dot{x}\end{bmatrix}$$
+
+状态转移函数是
+
+$$\mathbf{F} = \begin{bmatrix}1&1\\0&1\end{bmatrix}$$
+
+测量函数是
+
+$$\mathbf{H} = \begin{bmatrix}1&0\end{bmatrix}$$
+
+EnKF 是为非线性问题设计的，所以你需要提供 Python 函数，而不是用矩阵来实现状态转移函数和测量函数。对于这个问题，它们可以写成：
+
+```python
+def hx(x):
+    return np.array([x[0]])
+
+def fx(x, dt):
+    return F @ x
+```
+
+最后一点：EnKF 的代码与 UKF 的代码一样，对 $\mathbf{x}$ 使用一维数组，而不是线性卡尔曼滤波器代码所使用的二维列矩阵。
+
+不再赘述，代码如下。
+=====CELL 22=====
+可能有点难以看清，但 KF 和 EnKF 一开始略有不同，但很快就收敛到产生几乎相同的值。EnKF 是次优滤波器，所以它不会产生 KF 所产生的最优解。然而，我特意选择了相当小的 $N$（20），以保证 EnKF 的输出相当次优。如果我选择更合理的数，比如 2000，你在这张图上就看不出两个滤波器输出之间的差异了。
+=====CELL 23=====
+## 遗留问题
+=====CELL 24=====
+所有这些都应被视为*我的*问题，而不是文献中遗留的问题。然而，我是直接从该领域著名的资料中抄写方程的，而它们没有解决这些不一致之处。
+
+首先，在 Brown [2] 中，所有的和都乘以 $\frac{1}{N}$，如
+
+$$ \hat{x} = \frac{1}{N}\sum_{i=1}^N\chi_k^{(i)}$$
+
+Crassidis [3] 中的同一个方程读作（我会使用与 Brown 相同的记号，尽管 Crassidis 的记号不同）
+
+$$ \hat{x} = \frac{1}{N-1}\sum_{i=1}^N\chi_k^{(i)}$$
+
+在两个资料中，协方差计算中的和也是如此。Crassidis 在谈到滤波器的协方差时指出，使用 $N-1$ 是为了保证无偏估计。给定下面这些均值和标准差的标准方程（Crassidis 第 2 页），对协方差来说这是合理的。
+
+$$
+\begin{aligned}
+\mu &= \frac{1}{N}\sum_{i=1}^N[\tilde{z}(t_i) - \hat{z}(t_i)] \\
+ \sigma^2 &= \frac{1}{N-1}\sum_{i=1}^N\{[\tilde{z}(t_i) - \hat{z}(t_i)] - \mu\}^2
+\end{aligned}
+$$
+
+然而，我看不出有什么理由或依据要用 $N-1$ 来计算均值。如果我在滤波器中对均值使用 $N-1$，滤波器就不收敛，状态基本上直接跟随测量值，没有任何滤波效果。不过，我确实看到了在协方差上像 Crassidis 那样使用它的理由，这与 Brown 不同。同样，我用经验来支持我的决定——$N-1$ 在滤波器的实现中有效，$N$ 则无效。
+
+我的第二个问题与 $\mathbf{R}$ 矩阵的使用有关。在 Brown 中 $\mathbf{R}$ 被加到 $\mathbf{P}_{zz}$ 上，而在 Crassidis 和其他资料中则没有。我在网上读到其他实现者的笔记，说加上 R 对滤波器有帮助，而且这对我来说确实显得合理且必要，所以我就这样做。
+
+我的第三个问题与协方差 $\mathbf{P}$ 的计算有关。同样，Crassidis 和 Brown 中的方程不同。我选择了 Brown 中给出的实现，因为它似乎给出了我预期的行为（$\mathbf{P}$ 随时间收敛），而且它与线性 KF 中的形式相近。相比之下，我发现 Crassidis 中的方程似乎并没有多少收敛。
+
+我的第四个问题与状态估计的更新有关。在 Brown 中我们有
+
+$$\boldsymbol\chi  = \boldsymbol\chi + \mathbf{K}[\mathbf{z} -\mathbf{z}_{mean} + \mathbf{v}_R]$$
+
+而在 Crassidis 中我们有
+
+$$\boldsymbol\chi  = \boldsymbol\chi + \mathbf{K}[\mathbf{z} -\boldsymbol\chi_h + \mathbf{v}_R]$$
+
+对我来说，Crassidis 的方程看起来合乎逻辑，而且它产生的滤波器在线性问题上的表现与线性 KF 相同，所以这就是我选择的形式。
+
+我不愿意说哪一本书是错的；很有可能是我遗漏了某个让每一组方程都能工作的要点。我能说的是，当我按原样实现它们时，没有得到一个能工作的滤波器。我把“工作”定义为：在线性问题上的表现与线性 KF 基本相同。通过阅读网上的实现笔记和对各种问题的推理，我选择了本章中的实现，它确实似乎正确地工作。我还没有去研究大量的原始文献，它们很可能会给出对这些不一致之处的确切解释。即使我找到了调和各种差异的解释，我也想以某种形式把这些留在这里，因为如果我被这些书弄糊涂了，那么很可能其他人也会。
+=====CELL 25=====
+## 参考文献
+=====CELL 26=====
+- [1] Mackenzie, Dana. *Ensemble Kalman Filters Bring Weather Models Up to Date* Siam News,  Volume 36, Number 8, October 2003. http://www.siam.org/pdf/news/362.pdf
+
+- [2]  Brown, Robert Grover, and Patrick Y.C. Hwang. *Introduction to Random Signals and Applied Kalman Filtering, With MATLAB® excercises and solutions.* Wiley, 2012.
+
+- [3] Crassidis, John L., and John L. Junkins. *Optimal estimation of dynamic systems*. CRC press, 2011.

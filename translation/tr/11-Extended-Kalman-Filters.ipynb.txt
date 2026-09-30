@@ -1,0 +1,479 @@
+=====CELL 0=====
+[目录](./table_of_contents.ipynb)
+=====CELL 1=====
+# 扩展卡尔曼滤波器
+=====CELL 4=====
+我们已经发展出了线性卡尔曼滤波器的理论。然后，在最近两章中，我们谈到了把卡尔曼滤波器用于非线性问题的话题。在本章中，我们将学习扩展卡尔曼滤波器 (EKF)。EKF 通过在当前估计的点上对系统线性化来处理非线性，然后用线性卡尔曼滤波器对这个线性化后的系统进行滤波。它是最早用于非线性问题的技术之一，而且至今仍是最常用的技术。
+
+EKF 给滤波器的设计者带来了巨大的数学挑战；这是本书中最具挑战性的一章。我尽我所能避免使用 EKF，而倾向于其他为非线性问题滤波而开发的技术。然而，这个话题是无法回避的；该领域所有的经典论文和大多数当前的论文都使用 EKF。即使你自己的工作中不使用 EKF，你也需要熟悉这个话题，才能阅读文献。
+=====CELL 5=====
+## 对卡尔曼滤波器做线性化
+
+卡尔曼滤波器使用线性方程，所以它不适用于非线性问题。问题可以通过两种方式成为非线性的。第一，过程模型可能是非线性的。穿过大气层下落的物体会遇到阻力，这会降低它的加速度。阻力系数随物体的速度而变化。由此产生的行为是非线性的——不能用线性方程建模。第二，测量可能是非线性的。例如，雷达给出到目标的距离和方位。我们用非线性的三角学来计算目标的位置。
+
+对于线性滤波器，我们有这些过程模型和测量模型的方程：
+
+$$\begin{aligned}\dot{\mathbf x} &= \mathbf{Ax} + w_x\\
+\mathbf z &= \mathbf{Hx} + w_z
+\end{aligned}$$
+
+其中 $\mathbf A$ 是系统动力学矩阵。使用**卡尔曼滤波器数学**一章中讲过的状态空间方法，这些方程可以转换为
+$$\begin{aligned}\bar{\mathbf x} &= \mathbf{Fx} \\
+\mathbf z &= \mathbf{Hx}
+\end{aligned}$$
+
+其中 $\mathbf F$ 是*基本矩阵*。噪声项 $w_x$ 和 $w_z$ 被纳入矩阵 $\mathbf R$ 和 $\mathbf Q$。这种形式的方程使我们能够根据步骤 $k$ 的测量值和步骤 $k-1$ 的状态估计来计算步骤 $k$ 的状态。在前面的章节中，我通过使用可以用牛顿方程描述的问题来培养你的直觉并尽量减少数学。我们知道如何根据高中物理来设计 $\mathbf F$。
+
+
+对于非线性模型，线性表达式 $\mathbf{Fx} + \mathbf{Bu}$ 被替换为非线性函数 $f(\mathbf x, \mathbf u)$，线性表达式 $\mathbf{Hx}$ 被替换为非线性函数 $h(\mathbf x)$：
+
+$$\begin{aligned}\dot{\mathbf x} &= f(\mathbf x, \mathbf u) + w_x\\
+\mathbf z &= h(\mathbf x) + w_z
+\end{aligned}$$
+
+你可能会想，我们可以着手寻找一组新的卡尔曼滤波器方程来最优地求解这些方程。但如果你还记得**非线性滤波**一章中的图表，你会记得把高斯分布传入非线性函数会得到不再是高斯分布的概率分布。所以这行不通。
+
+EKF 并不改变卡尔曼滤波器的线性方程。相反，它在当前估计的点上对非线性方程*线性化*，并在线性卡尔曼滤波器中使用这个线性化结果。
+
+*线性化*就是字面意思。我们找到在某个给定点上与曲线最吻合的一条直线。下图在 $x=1.5$ 处对抛物线 $f(x)=x^2-2x$ 做了线性化。
+=====CELL 7=====
+如果上面的曲线是过程模型，那么虚线就表示该曲线在估计 $x=1.5$ 处的线性化。
+
+我们通过求导数来线性化系统，导数给出曲线的斜率：
+
+$$\begin{aligned}
+f(x) &= x^2 -2x \\
+\frac{df}{dx} &= 2x - 2
+\end{aligned}$$
+
+然后在 $x$ 处求值：
+
+$$\begin{aligned}m &= f'(x=1.5) \\&= 2(1.5) - 2 \\&= 1\end{aligned}$$
+
+对微分方程组线性化也是类似的。我们通过对 $f(\mathbf x, \mathbf u)$ 和 $h(\mathbf x)$ 分别求偏导数，在点 $\mathbf x_t$ 和 $\mathbf u_t$ 处计算 $\mathbf F$ 和 $\mathbf H$，来对它们线性化。我们把矩阵的偏导数称为[*雅可比矩阵*](https://en.wikipedia.org/wiki/Jacobian_matrix_and_determinant)。这给出离散的状态转移矩阵和测量模型矩阵：
+
+$$
+\begin{aligned}
+\mathbf F
+&= {\frac{\partial{f(\mathbf x_t, \mathbf u_t)}}{\partial{\mathbf x}}}\biggr|_{{\mathbf x_t},{\mathbf u_t}} \\
+\mathbf H &= \frac{\partial{h(\bar{\mathbf x}_t)}}{\partial{\bar{\mathbf x}}}\biggr|_{\bar{\mathbf x}_t}
+\end{aligned}
+$$
+
+这就得到了下面的 EKF 方程。我用方框标出了与线性滤波器的不同之处：
+
+$$\begin{array}{l|l}
+\text{linear Kalman filter} & \text{EKF} \\
+\hline
+& \boxed{\mathbf F = {\frac{\partial{f(\mathbf x_t, \mathbf u_t)}}{\partial{\mathbf x}}}\biggr|_{{\mathbf x_t},{\mathbf u_t}}} \\
+\mathbf{\bar x} = \mathbf{Fx} + \mathbf{Bu} & \boxed{\mathbf{\bar x} = f(\mathbf x, \mathbf u)}  \\
+\mathbf{\bar P} = \mathbf{FPF}^\mathsf{T}+\mathbf Q  & \mathbf{\bar P} = \mathbf{FPF}^\mathsf{T}+\mathbf Q \\
+\hline
+& \boxed{\mathbf H = \frac{\partial{h(\bar{\mathbf x}_t)}}{\partial{\bar{\mathbf x}}}\biggr|_{\bar{\mathbf x}_t}} \\
+\textbf{y} = \mathbf z - \mathbf{H \bar{x}} & \textbf{y} = \mathbf z - \boxed{h(\bar{x})}\\
+\mathbf{K} = \mathbf{\bar{P}H}^\mathsf{T} (\mathbf{H\bar{P}H}^\mathsf{T} + \mathbf R)^{-1} & \mathbf{K} = \mathbf{\bar{P}H}^\mathsf{T} (\mathbf{H\bar{P}H}^\mathsf{T} + \mathbf R)^{-1} \\
+\mathbf x=\mathbf{\bar{x}} +\mathbf{K\textbf{y}} & \mathbf x=\mathbf{\bar{x}} +\mathbf{K\textbf{y}} \\
+\mathbf P= (\mathbf{I}-\mathbf{KH})\mathbf{\bar{P}} & \mathbf P= (\mathbf{I}-\mathbf{KH})\mathbf{\bar{P}}
+\end{array}$$
+
+在 EKF 中我们通常不使用 $\mathbf{Fx}$ 来传播状态，因为线性化会造成不精确。通常使用合适的数值积分技术，如欧拉法或 Runge Kutta 来计算 $\bar{\mathbf x}$。因此我写成 $\mathbf{\bar x} = f(\mathbf x, \mathbf u)$。出于同样的原因，我们在计算残差时不使用 $\mathbf{H\bar{x}}$，而选择更精确的 $h(\bar{\mathbf x})$。
+
+我认为理解 EKF 最简单的方法是从一个例子开始。以后你可能想回来重读这一节。
+=====CELL 8=====
+## 示例：跟踪一架飞机
+
+这个例子使用地面雷达跟踪一架飞机。我们在上一章中为这个问题实现了 UKF。现在我们将为同一个问题实现 EKF，这样我们就可以比较两种滤波器的性能以及实现滤波器所需的工作量。
+
+雷达的工作原理是发射一束无线电波，并扫描返回的反射。波束路径上的任何东西都会把一部分信号反射回雷达。通过测量反射信号返回雷达所需的时间，系统可以计算*斜距*——从雷达设施到物体的直线距离。
+
+雷达的斜距 $r$ 和仰角 $\epsilon$ 与飞机的水平位置 $x$ 和高度 $y$ 之间的关系如下图所示：
+=====CELL 10=====
+这给出等式：
+
+$$\begin{aligned}
+\epsilon &= \tan^{-1} \frac y x\\
+r^2 &= x^2 + y^2
+\end{aligned}$$
+=====CELL 11=====
+### 设计状态变量
+
+我们想在假设匀速和恒定高度的前提下，根据到飞机的斜距测量值来跟踪飞机的位置。这意味着我们需要 3 个状态变量——水平距离、水平速度和高度：
+
+$$\mathbf x = \begin{bmatrix}\mathtt{distance} \\\mathtt{velocity}\\ \mathtt{altitude}\end{bmatrix}=    \begin{bmatrix}x \\ \dot x\\ y\end{bmatrix}$$
+=====CELL 12=====
+### 设计过程模型
+
+我们为飞机假设一个牛顿运动学系统。我们在前面的章节中用过这个模型，所以通过观察你可能会认出我们想要的是
+
+$$\mathbf F = \left[\begin{array}{cc|c} 1 & \Delta t & 0\\
+0 & 1 & 0 \\ \hline
+0 & 0 & 1\end{array}\right]$$
+
+我把矩阵分成了块，以显示左上块是 $x$ 的匀速模型，右下块是 $y$ 的恒定位置模型。
+
+然而，让我们练习找到这些矩阵。我们用一组微分方程对系统建模。我们需要一个形如下式的方程
+
+$$\dot{\mathbf x} = \mathbf{Ax} + \mathbf{w}$$
+其中 $\mathbf{w}$ 是系统噪声。
+
+变量 $x$ 和 $y$ 是独立的，所以我们可以分别计算它们。一维运动的微分方程是：
+
+$$\begin{aligned}v &= \dot x \\
+a &= \ddot{x} = 0\end{aligned}$$
+
+现在我们把微分方程写成状态空间形式。如果这是二阶或更高阶的微分系统，我们就必须先把它们化简成等价的一阶方程组。这些方程是一阶的，所以我们把它们写成状态空间矩阵形式
+
+$$\begin{aligned}\begin{bmatrix}\dot x \\ \ddot{x}\end{bmatrix} &= \begin{bmatrix}0&1\\0&0\end{bmatrix} \begin{bmatrix}x \\
+\dot x\end{bmatrix} \\ \dot{\mathbf x} &= \mathbf{Ax}\end{aligned}$$
+其中 $\mathbf A=\begin{bmatrix}0&1\\0&0\end{bmatrix}$。
+
+回想一下，$\mathbf A$ 是*系统动力学矩阵*。它描述一组线性微分方程。我们必须由它计算状态转移矩阵 $\mathbf F$。$\mathbf F$ 描述一组离散的线性方程，用来计算离散时间步 $\Delta t$ 的 $\mathbf x$。
+
+计算 $\mathbf F$ 的一种常用方法是使用矩阵指数的幂级数展开：
+
+$$\mathbf F(\Delta t) = e^{\mathbf A\Delta t} = \mathbf{I} + \mathbf A\Delta t  + \frac{(\mathbf A\Delta t)^2}{2!} + \frac{(\mathbf A \Delta t)^3}{3!} + ... $$
+
+
+$\mathbf A^2 = \begin{bmatrix}0&0\\0&0\end{bmatrix}$，所以 $\mathbf A$ 的所有更高次幂也是 $\mathbf{0}$。因此幂级数展开是：
+
+$$
+\begin{aligned}
+\mathbf F &=\mathbf{I} + \mathbf At + \mathbf{0} \\
+&= \begin{bmatrix}1&0\\0&1\end{bmatrix} + \begin{bmatrix}0&1\\0&0\end{bmatrix}\Delta t\\
+\mathbf F &= \begin{bmatrix}1&\Delta t\\0&1\end{bmatrix}
+\end{aligned}$$
+
+这与运动学方程使用的结果相同！这个练习除了说明如何由线性微分方程求状态转移矩阵之外是不必要的。我们将以一个需要使用这种技术的例子来结束本章。
+=====CELL 13=====
+### 设计测量模型
+
+测量函数取先验的状态估计 $\bar{\mathbf x}$，并把它转换成斜距的测量值。我们用勾股定理推导：
+
+$$h(\bar{\mathbf x}) = \sqrt{x^2 + y^2}$$
+
+由于平方根的存在，斜距与地面位置之间的关系是非线性的。我们通过在 $\mathbf x_t$ 处求它的偏导数来线性化它：
+
+$$
+\mathbf H = \frac{\partial{h(\bar{\mathbf x})}}{\partial{\bar{\mathbf x}}}\biggr|_{\bar{\mathbf x}_t}
+$$
+
+矩阵的偏导数称为雅可比矩阵，其形式为
+
+$$\frac{\partial \mathbf H}{\partial \bar{\mathbf x}} =
+\begin{bmatrix}
+\frac{\partial h_1}{\partial x_1} & \frac{\partial h_1}{\partial x_2} &\dots \\
+\frac{\partial h_2}{\partial x_1} & \frac{\partial h_2}{\partial x_2} &\dots \\
+\vdots & \vdots
+\end{bmatrix}
+$$
+
+换句话说，矩阵中的每个元素是函数 $h$ 对 $x$ 各变量的偏导数。对于我们的问题，我们有
+
+$$\mathbf H = \begin{bmatrix}{\partial h}/{\partial x} & {\partial h}/{\partial \dot{x}} & {\partial h}/{\partial y}\end{bmatrix}$$
+
+依次求解每一项：
+
+$$\begin{aligned}
+\frac{\partial h}{\partial x} &= \frac{\partial}{\partial x} \sqrt{x^2 + y^2} \\
+&= \frac{x}{\sqrt{x^2 + y^2}}
+\end{aligned}$$
+
+以及
+
+$$\begin{aligned}
+\frac{\partial h}{\partial \dot{x}} &=
+\frac{\partial}{\partial \dot{x}} \sqrt{x^2 + y^2} \\
+&= 0
+\end{aligned}$$
+
+以及
+
+$$\begin{aligned}
+\frac{\partial h}{\partial y} &= \frac{\partial}{\partial y} \sqrt{x^2 + y^2} \\
+&= \frac{y}{\sqrt{x^2 + y^2}}
+\end{aligned}$$
+
+得到
+
+$$\mathbf H =
+\begin{bmatrix}
+\frac{x}{\sqrt{x^2 + y^2}} &
+0 &
+&
+\frac{y}{\sqrt{x^2 + y^2}}
+\end{bmatrix}$$
+
+这可能看起来令人生畏，所以请退一步，认识到所有这些数学做的事情非常简单。我们有一个关于飞机斜距的方程，它是非线性的。卡尔曼滤波器只适用于线性方程，所以我们需要找到一个近似 $\mathbf H$ 的线性方程。正如我们上面讨论过的，求非线性方程在给定点的斜率是一个很好的近似。对于卡尔曼滤波器，“给定点”就是状态变量 $\mathbf x$，所以我们需要对斜距求关于 $\mathbf x$ 的导数。对于线性卡尔曼滤波器，$\mathbf H$ 是我们在运行滤波器之前计算好的常数。对于 EKF，$\mathbf H$ 在每一步都要更新，因为求值点 $\bar{\mathbf x}$ 在每个历元都在变化。
+
+为了使这更具体，现在让我们编写一个 Python 函数，计算这个问题中 $h$ 的雅可比矩阵。
+=====CELL 15=====
+最后，让我们给出 $h(\bar{\mathbf x})$ 的代码：
+=====CELL 17=====
+现在让我们为我们的雷达编写一个模拟。
+=====CELL 19=====
+### 设计过程噪声和测量噪声
+
+雷达测量到目标的距离。我们将使用 $\sigma_{range}= 5$ 米作为噪声。这给出
+
+$$\mathbf R = \begin{bmatrix}\sigma_{range}^2\end{bmatrix} = \begin{bmatrix}25\end{bmatrix}$$
+
+
+$\mathbf Q$ 的设计需要一些讨论。状态 $\mathbf x= \begin{bmatrix}x & \dot x & y\end{bmatrix}^\mathtt{T}$。前两个元素是位置（沿雷达方向的水平距离）和速度，所以我们可以使用 `Q_discrete_white_noise` 来计算 $\mathbf Q$ 左上部分的值。$\mathbf x$ 的第三个元素是高度，我们假设它与水平距离无关。这就得到 $\mathbf Q$ 的分块设计：
+
+$$\mathbf Q = \begin{bmatrix}\mathbf Q_\mathtt{x} & 0 \\ 0 & \mathbf Q_\mathtt{y}\end{bmatrix}$$
+=====CELL 20=====
+### 实现
+
+`FilterPy` 提供了 `ExtendedKalmanFilter` 类。它的工作方式与我们一直在使用的 `KalmanFilter` 类相似，只是它允许你提供一个计算 $\mathbf H$ 的雅可比矩阵的函数和函数 $h(\mathbf x)$。
+
+我们从导入滤波器并创建它开始。`x` 的维数是 3，`z` 的维数是 1。
+
+```python
+from filterpy.kalman import ExtendedKalmanFilter
+
+rk = ExtendedKalmanFilter(dim_x=3, dim_z=1)
+```
+我们创建雷达模拟器：
+```python
+radar = RadarSim(dt, pos=0., vel=100., alt=1000.)
+```
+我们将在飞机实际位置附近初始化滤波器：
+
+```python
+rk.x = array([radar.pos, radar.vel-10, radar.alt+100])
+```
+
+我们用上面计算的泰勒级数展开的第一项来赋值系统矩阵：
+
+```python
+dt = 0.05
+rk.F = eye(3) + array([[0, 1, 0],
+                       [0, 0, 0],
+                       [0, 0, 0]])*dt
+```
+
+在为 $\mathbf R$、$\mathbf Q$ 和 $\mathbf P$ 赋予合理的值之后，我们可以用一个简单的循环运行滤波器。我们把计算 $\mathbf  H$ 的雅可比矩阵和 $h(x)$ 的函数传入 `update` 方法。
+
+```python
+for i in range(int(20/dt)):
+    z = radar.get_range()
+    rk.update(array([z]), HJacobian_at, hx)
+    rk.predict()
+```
+
+加上一些保存和绘制结果的样板代码，我们得到：
+=====CELL 22=====
+## 使用 SymPy 计算雅可比矩阵
+
+取决于你在导数方面的经验，你可能觉得雅可比矩阵的计算很困难。即使你觉得容易，一个稍微难一点的问题也很容易导致非常困难的计算。
+
+正如附录 A 中所解释的，我们可以使用 SymPy 包来为我们计算雅可比矩阵。
+=====CELL 24=====
+这个结果与我们上面计算的结果相同，而且我们花的力气少得多！
+=====CELL 25=====
+## 机器人定位
+
+是时候尝试一个真实的问题了。我警告你，这一节很难。然而，大多数书籍选择简单的、教科书式的问题，答案也简单，而你只能困惑于如何解决真实世界的问题。
+
+我们将考虑机器人定位的问题。我们已经在**无迹卡尔曼滤波器**一章中实现过它，如果你还没有读过，我建议你现在就读。在这个场景中，我们有一个机器人在地形中移动，并使用传感器检测地标。这可能是一辆使用计算机视觉识别树木、建筑物和其他地标的自动驾驶汽车。它也可能是给你家吸尘的那种小机器人，或者是仓库里的机器人。
+
+机器人有 4 个轮子，配置与汽车所用的相同。它通过转动前轮来机动。这会使机器人在向前移动时绕后轴旋转。这是非线性行为，我们必须对其建模。
+
+机器人有一个传感器，测量到地形中已知目标的距离和方位。这是非线性的，因为由距离和方位计算位置需要平方根和三角学。
+
+过程模型和测量模型都是非线性的。EKF 能够同时适应两者，所以我们初步得出结论：EKF 是解决这个问题的可行选择。
+=====CELL 26=====
+### 机器人运动模型
+
+作为第一近似，汽车通过在向前移动时转动前轮来转向。车头沿车轮所指的方向移动，同时绕后轮旋转。这种简单的描述会因为一些问题而变得复杂，比如摩擦引起的打滑、橡胶轮胎在不同速度下的不同表现，以及外侧轮胎需要走与内侧轮胎不同半径的路径。要精确地对转向建模，需要一组复杂的微分方程。
+
+对于较低速度的机器人应用，人们发现更简单的*自行车模型*表现良好。这是该模型的示意图：
+=====CELL 28=====
+在**无迹卡尔曼滤波器**一章中，我们推导了这些方程：
+
+$$\begin{aligned}
+\beta &= \frac d w \tan(\alpha) \\
+x &= x - R\sin(\theta) + R\sin(\theta + \beta) \\
+y &= y + R\cos(\theta) - R\cos(\theta + \beta) \\
+\theta &= \theta + \beta
+\end{aligned}
+$$
+
+其中 $\theta$ 是机器人的航向。
+
+如果你对转向模型不感兴趣，就不需要详细理解这个模型。需要认识到的重要一点是，我们的运动模型是非线性的，我们需要用卡尔曼滤波器来处理它。
+=====CELL 29=====
+### 设计状态变量
+
+对于我们的滤波器，我们将维护机器人的位置 $x,y$ 和朝向 $\theta$：
+
+$$\mathbf x = \begin{bmatrix}x \\ y \\ \theta\end{bmatrix}$$
+
+我们的控制输入 $\mathbf u$ 是速度 $v$ 和转向角 $\alpha$：
+
+$$\mathbf u = \begin{bmatrix}v \\ \alpha\end{bmatrix}$$
+=====CELL 30=====
+### 设计系统模型
+
+我们把系统建模为非线性运动模型加噪声。
+
+$$\bar x = f(x, u) + \mathcal{N}(0, Q)$$
+
+
+
+使用我们上面为机器人创建的运动模型，可以把它展开为
+
+$$\bar{\begin{bmatrix}x\\y\\\theta\end{bmatrix}} = \begin{bmatrix}x\\y\\\theta\end{bmatrix} +
+\begin{bmatrix}- R\sin(\theta) + R\sin(\theta + \beta) \\
+R\cos(\theta) - R\cos(\theta + \beta) \\
+\beta\end{bmatrix}$$
+
+我们通过对 $f(x,u)$ 求雅可比矩阵来求 $\mathbf F$。
+
+$$\mathbf F = \frac{\partial f(x, u)}{\partial x} =\begin{bmatrix}
+\frac{\partial f_1}{\partial x} &
+\frac{\partial f_1}{\partial y} &
+\frac{\partial f_1}{\partial \theta}\\
+\frac{\partial f_2}{\partial x} &
+\frac{\partial f_2}{\partial y} &
+\frac{\partial f_2}{\partial \theta} \\
+\frac{\partial f_3}{\partial x} &
+\frac{\partial f_3}{\partial y} &
+\frac{\partial f_3}{\partial \theta}
+\end{bmatrix}
+$$
+
+当我们计算这些时，得到
+
+$$\mathbf F = \begin{bmatrix}
+1 & 0 & -R\cos(\theta) + R\cos(\theta+\beta) \\
+0 & 1 & -R\sin(\theta) + R\sin(\theta+\beta) \\
+0 & 0 & 1
+\end{bmatrix}$$
+
+我们可以用 SymPy 复核我们的工作。
+=====CELL 32=====
+这看起来有点复杂。我们可以用 SymPy 替换一些项：
+=====CELL 34=====
+这种形式验证了雅可比矩阵的计算是正确的。
+
+现在我们可以把注意力转向噪声。这里，噪声在我们的控制输入中，所以它在*控制空间*中。换句话说，我们指令一个特定的速度和转向角，但我们需要把它转换成 $x, y, \theta$ 中的误差。在真实系统中，这可能随速度而变化，所以它需要在每次预测时重新计算。我将选择这个作为噪声模型；对于真实的机器人，你需要选择一个能准确描述你系统中误差的模型。
+
+$$\mathbf{M} = \begin{bmatrix}\sigma_{vel}^2 & 0 \\ 0 & \sigma_\alpha^2\end{bmatrix}$$
+
+如果这是一个线性问题，我们会用现在已经熟悉的 $\mathbf{FMF}^\mathsf T$ 形式把控制空间转换到状态空间。由于我们的运动模型是非线性的，我们不试图找它的封闭形式的解，而是用雅可比矩阵对它线性化，我们把这个雅可比矩阵命名为 $\mathbf{V}$。
+
+$$\mathbf{V} = \frac{\partial f(x, u)}{\partial u} \begin{bmatrix}
+\frac{\partial f_1}{\partial v} & \frac{\partial f_1}{\partial \alpha} \\
+\frac{\partial f_2}{\partial v} & \frac{\partial f_2}{\partial \alpha} \\
+\frac{\partial f_3}{\partial v} & \frac{\partial f_3}{\partial \alpha}
+\end{bmatrix}$$
+
+这些偏导数变得非常难以处理。让我们用 SymPy 来计算它们。
+=====CELL 36=====
+这应该能让你体会到 EKF 变得在数学上难以处理有多快。
+
+这给出了我们预测方程的最终形式：
+
+$$\begin{aligned}
+\mathbf{\bar x} &= \mathbf x +
+\begin{bmatrix}- R\sin(\theta) + R\sin(\theta + \beta) \\
+R\cos(\theta) - R\cos(\theta + \beta) \\
+\beta\end{bmatrix}\\
+\mathbf{\bar P} &=\mathbf{FPF}^{\mathsf T} + \mathbf{VMV}^{\mathsf T}
+\end{aligned}$$
+
+这种线性化形式并不是预测 $\mathbf x$ 的唯一方法。例如，我们可以使用数值积分技术，如 *Runge Kutta*，来计算机器人的运动。如果时间步相对较大，就需要这样做。EKF 的情形不像卡尔曼滤波器那样界限分明。对于真实的问题，你必须用微分方程仔细地对系统建模，然后确定求解该系统最合适的方法。正确的方法取决于你所需的精度、方程的非线性程度、你的处理器预算，以及数值稳定性方面的考虑。
+=====CELL 37=====
+### 设计测量模型
+
+机器人的传感器提供到地形中多个已知位置的带噪声的方位和距离测量值。测量模型必须把状态 $\begin{bmatrix}x & y&\theta\end{bmatrix}^\mathsf T$ 转换成到地标的距离和方位。如果 $\mathbf p$ 是某个地标的位置，距离 $r$ 是
+
+$$r = \sqrt{(p_x - x)^2 + (p_y - y)^2}$$
+
+传感器提供相对于机器人朝向的方位，所以我们必须从方位中减去机器人的朝向，才能得到传感器读数，像这样：
+
+$$\phi = \arctan(\frac{p_y - y}{p_x - x}) - \theta$$
+
+
+因此我们的测量模型 $h$ 是
+
+
+$$\begin{aligned}
+\mathbf z& = h(\bar{\mathbf x}, \mathbf p) &+ \mathcal{N}(0, R)\\
+&= \begin{bmatrix}
+\sqrt{(p_x - x)^2 + (p_y - y)^2} \\
+\arctan(\frac{p_y - y}{p_x - x}) - \theta
+\end{bmatrix} &+ \mathcal{N}(0, R)
+\end{aligned}$$
+
+这显然是非线性的，所以我们需要通过求雅可比矩阵在 $\mathbf x$ 处对 $h$ 线性化。我们在下面用 SymPy 来计算。
+=====CELL 39=====
+现在我们需要把它写成 Python 函数。例如我们可以这样写：
+=====CELL 41=====
+我们还需要定义一个把系统状态转换成测量值的函数。
+=====CELL 43=====
+### 设计测量噪声
+
+假设距离和方位测量的噪声是独立的是合理的，因此
+
+$$\mathbf R=\begin{bmatrix}\sigma_{range}^2 & 0 \\ 0 & \sigma_{bearing}^2\end{bmatrix}$$
+=====CELL 44=====
+### 实现
+
+我们将使用 `FilterPy` 的 `ExtendedKalmanFilter` 类来实现滤波器。它的 `predict()` 方法对过程模型使用标准的线性方程。我们的过程模型是非线性的，所以我们必须用自己的实现覆盖 `predict()`。我还想用这个类来模拟机器人，所以我会添加一个 `move()` 方法，计算机器人的位置，`predict()` 和我的模拟都可以调用它。
+
+预测步骤的矩阵相当大。在编写这段代码时，我在最终让它工作之前犯了好几个错误。我是通过使用 SymPy 的 `evalf` 函数才发现错误的。`evalf` 用变量的具体值对 SymPy 的 `Matrix` 求值。我决定向你演示这种技术，并在卡尔曼滤波器代码中使用了 `evalf`。你需要理解几点。
+
+首先，`evalf` 使用字典来指定值。例如，如果你的矩阵包含 `x` 和 `y`，你可以写
+
+```python
+    M.evalf(subs={x:3, y:17})
+```
+
+来对 `x=3` 和 `y=17` 求矩阵的值。
+
+其次，`evalf` 返回的是 `sympy.Matrix` 对象。使用 `numpy.array(M).astype(float)` 把它转换成 NumPy 数组。`numpy.array(M)` 创建的是 `object` 类型的数组，这不是你想要的。
+
+这是 EKF 的代码：
+=====CELL 46=====
+现在我们有另一个问题要处理。残差在概念上计算为 $y = z - h(x)$，但这行不通，因为我们的测量值中包含角度。假设 z 的方位是 $1^\circ$，而 $h(x)$ 的方位是 $359^\circ$。直接相减会得到 $-358^\circ$ 的角度差，而正确的值是 $2^\circ$。我们必须编写代码来正确计算方位残差。
+=====CELL 48=====
+其余的代码运行模拟并绘制结果，到现在应该不需要太多评论了。我创建了一个变量 `landmarks`，包含地标坐标。我每秒更新 10 次模拟的机器人位置，但每秒只运行一次 EKF。这有两个原因。第一，我们没有使用 Runge Kutta 对运动微分方程积分，所以较窄的时间步能让我们的模拟更精确。第二，在嵌入式系统中处理速度有限是相当正常的。这迫使你只在绝对需要时才运行卡尔曼滤波器。
+=====CELL 51=====
+我把地标绘制成实心方块。机器人的路径用黑线画出。预测步骤的协方差椭圆是浅灰色，更新的协方差用绿色显示。为了在这个尺度上让它们可见，我把椭圆边界设为 6$\sigma$。
+
+我们可以看到，我们的运动模型增加了很多不确定性，而且大部分误差在运动方向上。我们是从蓝色椭圆的形状判断出这一点的。经过几步之后，我们可以看到滤波器纳入了地标测量值，误差有所改善。
+
+我在 UKF 一章中使用了相同的初始条件和地标位置。就误差椭圆而言，UKF 达到了好得多的精度。就它们对 $\mathbf x$ 的估计而言，两者的表现大致相当。
+
+现在让我们再添加一个地标。
+=====CELL 53=====
+轨迹末端附近估计的不确定性更小了。我们可以只使用前两个地标，来看多个地标对我们不确定性的影响。
+=====CELL 55=====
+估计在经过地标之后很快偏离了机器人的路径。协方差也迅速增长。让我们看看只有一个地标时会发生什么：
+=====CELL 57=====
+正如你可能猜到的，一个地标产生非常糟糕的结果。反过来，大量的地标使我们能够做出非常准确的估计。
+=====CELL 59=====
+### 讨论
+
+我说过这是一个真实的问题，在某些方面确实如此。我见过另一些讲解，它们使用的机器人运动模型会得到更简单的雅可比矩阵。另一方面，我的运动模型在几个方面也是简单化的。首先，它使用自行车模型。真实的汽车有两组轮胎，各自走不同的半径。车轮也不能完美地抓住路面。我还假设机器人对控制输入的响应是瞬时的。Sebastian Thrun 在 *Probabilistic Robots* 中写道，这个简化的模型是合理的，因为这些滤波器在用于跟踪真实车辆时表现良好。这里的教训是，虽然你必须有一个相当精确的非线性模型，但它不需要完美就能良好运行。作为设计者，你需要在模型的保真度与数学的难度以及执行线性代数所需的 CPU 时间之间取得平衡。
+
+这个问题的另一个简化之处在于，我们假设知道地标与测量值之间的对应关系。但假设我们使用的是雷达——我们怎么知道某个特定的信号回波对应于局部场景中的某座特定建筑？这个问题暗示了 SLAM 算法——同步定位与地图构建。SLAM 不是本书的重点，所以我不会详细阐述这个话题。
+=====CELL 60=====
+## UKF 与 EKF 的比较
+
+
+在上一章中，我用 UKF 解决了这个问题。实现上的差异应该非常清楚。尽管运动模型很初级，计算状态模型和测量模型的雅可比矩阵仍然不简单。换一个问题，可能会得到难以或不可能解析推导的雅可比矩阵。相比之下，UKF 只要求你提供一个计算系统运动模型的函数和另一个计算测量模型的函数。
+
+有许多情况下无法解析地求出雅可比矩阵。细节超出了本书的范围，但你将不得不用数值方法计算雅可比矩阵。这项工作并不简单，你会在一所 STEM 学校的硕士学位中花很大一部分时间来学习处理这类情形的技术。即便如此，你也很可能只能解决与你所在领域相关的问题——航空工程师会学到很多关于 Navier Stokes 方程的知识，但不太会学到如何为化学反应速率建模。
+
+所以，UKF 很容易。它们准确吗？在实践中它们的表现往往优于 EKF。你可以找到大量研究论文，证明 UKF 在各种问题领域中优于 EKF。不难理解为什么会这样。EKF 的工作方式是在单个点上对系统模型和测量模型线性化，而 UKF 使用 $2n+1$ 个点。
+
+让我们看一个具体的例子。取 $f(x) = x^3$，并让一个高斯分布通过它。我将用蒙特卡洛模拟计算一个精确的答案。我生成 50,000 个按高斯分布随机分布的点，把每个点传入 $f(x)$，然后计算结果的均值和方差。
+
+EKF 通过求导数得到求值点 $x$ 处的斜率来对函数线性化。这个斜率成为我们用来变换高斯分布的线性函数。下面是它的图。
+=====CELL 62=====
+EKF 的计算相当不准确。相比之下，这是 UKF 的表现：
+=====CELL 64=====
+在这里我们可以看到 UKF 的均值计算精确到小数点后 2 位。标准差略有偏差，但你也可以通过使用生成 sigma 点的 $\alpha$、$\beta$ 和 $\gamma$ 参数来微调 UKF 如何计算分布。这里我使用了 $\alpha=0.001$、$\beta=3$ 和 $\gamma=1$。请随意修改它们看看结果。你应该能得到比我更好的结果。不过，要避免针对某个特定测试过度调整 UKF。它可能在你的测试用例上表现更好，但总体上会更差。

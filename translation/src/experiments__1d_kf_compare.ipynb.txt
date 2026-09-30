@@ -1,0 +1,2 @@
+=====CELL 1=====
+Compare 1d kalman filter with full kalman filter with only 1 observed state variable.

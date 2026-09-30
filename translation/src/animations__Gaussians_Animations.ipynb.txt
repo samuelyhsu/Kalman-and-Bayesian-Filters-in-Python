@@ -1,0 +1,2 @@
+=====CELL 2=====
+<img src='04_gaussian_animate.gif'>

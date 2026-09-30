@@ -1,0 +1,28 @@
+=====CELL 1=====
+# Linearizing with Taylor Series
+
+Taylor series represents a function as an infinite sum of terms. The terms are linear, even for a nonlinear function, so we can express any arbitrary nonlinear function using linear algebra. The cost of this choice is that unless we use an infinite number of terms the value we compute will be approximate rather than exact.
+
+The Taylor series for a real or complex function f(x) at x=a is the infinite series
+
+$$f(x) = f(a) + f'(a)(x-a) + \frac{f''(a)}{2!}(x-a)^2 + \, ...\,  + \frac{f^{(n)}(a)}{n!}(x-a)^n + \, ...$$
+
+where $f^{n}$ is the nth derivative of f. To compute the Taylor series for $f(x)=sin(x)$ at $x=0$ let's first work out the terms for f.
+
+$$\begin{aligned}
+f^{0}(x) &= sin(x) ,\ \  &f^{0}(0) &= 0 \\
+f^{1}(x) &= cos(x),\ \  &f^{1}(0) &= 1 \\
+f^{2}(x) &= -sin(x),\ \  &f^{2}(0) &= 0 \\
+f^{3}(x) &= -cos(x),\ \  &f^{3}(0) &= -1 \\
+f^{4}(x) &= sin(x),\ \  &f^{4}(0) &= 0 \\
+f^{5}(x) &= cos(x),\ \  &f^{5}(0) &= 1
+\end{aligned}
+$$
+
+Now we can substitute these values into the equation.
+
+$$\sin(x) = \frac{0}{0!}(x)^0 + \frac{1}{1!}(x)^1 + \frac{0}{2!}(x)^2 + \frac{-1}{3!}(x)^3 + \frac{0}{4!}(x)^4 + \frac{1}{5!}(x)^5 + ... $$
+
+And let's test this with some code:
+=====CELL 3=====
+This is not bad for only three terms. If you are curious, go ahead and implement this as a Python function to compute the series for an arbitrary number of terms.

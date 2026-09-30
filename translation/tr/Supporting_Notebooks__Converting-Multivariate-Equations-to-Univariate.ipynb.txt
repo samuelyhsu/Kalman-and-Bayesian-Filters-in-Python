@@ -1,0 +1,114 @@
+=====CELL 1=====
+# 把多元方程转换为一元情形
+
+多元卡尔曼滤波器的方程与一元滤波器的方程看起来并不相像。但是，如果我们使用一维的状态和测量值，这些方程确实会简化为一元方程。本节将让你对卡尔曼滤波方程实际在做什么有一个直观而深刻的理解。虽然理解本书其余部分并不需要读这一节，但我建议仔细阅读，因为它应该会让其余内容更容易理解。
+
+下面是预测的多元方程。
+
+$$
+\begin{aligned}
+\mathbf{\bar{x}} &= \mathbf{F x} + \mathbf{B u} \\
+\mathbf{\bar{P}} &= \mathbf{FPF}^\mathsf{T} + \mathbf Q
+\end{aligned}
+$$
+
+对于一元问题，状态 $\mathbf x$ 只有一个变量，所以它是一个 $1\times 1$ 矩阵。我们的运动 $\mathbf{u}$ 也是一个 $1\times 1$ 矩阵。因此，$\mathbf{F}$ 和 $\mathbf B$ 也必须是 $1\times 1$ 矩阵。这意味着它们都是标量，我们可以写成
+
+$$\bar{x} = Fx + Bu$$
+
+这里变量没有加粗，表示它们不是矩阵或向量。
+
+我们的状态转移很简单——下一个状态与当前状态相同，所以 $F=1$。运动转移也是如此，所以 $B=1$。于是我们得到
+
+$$x = x + u$$
+
+这等价于上一章中的高斯方程
+
+$$ \mu = \mu_1+\mu_2$$
+
+希望大致的过程已经清楚了，所以其余部分我会讲得快一些。我们有
+
+$$\mathbf{\bar{P}} = \mathbf{FPF}^\mathsf{T} + \mathbf Q$$
+
+同样，由于我们的状态只有一个变量，$\mathbf P$ 和 $\mathbf Q$ 也必须是 $1\times 1$ 矩阵，可以把它们当作标量处理，得到
+
+$$\bar{P} = FPF^\mathsf{T} + Q$$
+
+我们已经知道 $F=1$。标量的转置就是它本身，所以 $F^\mathsf{T} = 1$。这就得到
+
+$$\bar{P} = P + Q$$
+
+这等价于高斯方程
+
+$$\sigma^2 = \sigma_1^2 + \sigma_2^2$$
+
+这证明了在维度为 1 的情况下，多元预测方程所做的数学运算与一元方程相同。
+
+下面是更新步骤的方程：
+
+$$
+\begin{aligned}
+\mathbf{K}&= \mathbf{\bar{P}H}^\mathsf{T} (\mathbf{H\bar{P}H}^\mathsf{T} + \mathbf R)^{-1} \\
+\textbf{y} &= \mathbf z - \mathbf{H \bar{x}}\\
+\mathbf x&=\mathbf{\bar{x}} +\mathbf{K\textbf{y}} \\
+\mathbf P&= (\mathbf{I}-\mathbf{KH})\mathbf{\bar{P}}
+\end{aligned}
+$$
+
+和上面一样，所有矩阵都变成标量。$H$ 定义了我们如何把位置转换为测量值。两者都是位置，所以无需转换，因此 $H=1$。我们一步代入已知的值并转换为标量。1x1 矩阵的逆是该值的倒数，所以我们把矩阵求逆转换为除法。
+
+$$
+\begin{aligned}
+K &=\frac{\bar{P}}{\bar{P} + R} \\
+y &= z - \bar{x}\\
+x &=\bar{x}+Ky \\
+P &= (1-K)\bar{P}
+\end{aligned}
+$$
+
+在继续证明之前，我希望你看一看这些方程，认识到它们实现的是多么简单的概念。残差 $y$ 只不过是测量值减去预测值。增益 $K$ 的大小取决于我们对上一次预测有多确定，与对测量有多确定的对比。我们根据 $x$ 的旧值加上按比例缩放的残差，来选择新的状态 $x$。最后，我们根据对测量有多确定来更新不确定性。从算法上讲，这听起来应该与我们在上一章中所做的完全一样。
+
+让我们完成代数推导来证明这一点。回顾更新步骤的一元方程：
+
+$$
+\begin{aligned}
+\mu &=\frac{\sigma_1^2 \mu_2 + \sigma_2^2 \mu_1} {\sigma_1^2 + \sigma_2^2}, \\
+\sigma^2 &= \frac{1}{\frac{1}{\sigma_1^2} + \frac{1}{\sigma_2^2}}
+\end{aligned}
+$$
+
+这里我们令 $\mu_1$ 为状态 $x$，$\mu_2$ 为测量值 $z$。由此可知 $\sigma_1^2$ 是状态不确定性 $P$，$\sigma_2^2$ 是测量噪声 $R$。代入这些：
+
+$$\begin{aligned} \mu &= \frac{Pz + Rx}{P+R} \\
+\sigma^2 &= \frac{1}{\frac{1}{P} + \frac{1}{R}}
+\end{aligned}$$
+
+我先处理 $\mu$。多元情形中对应的方程是
+
+$$
+\begin{aligned}
+x &= x + Ky \\
+&= x + \frac{P}{P+R}(z-x) \\
+&= \frac{P+R}{P+R}x + \frac{Pz - Px}{P+R} \\
+&= \frac{Px + Rx + Pz - Px}{P+R} \\
+&= \frac{Pz + Rx}{P+R}
+\end{aligned}
+$$
+
+现在来看 $\sigma^2$。多元情形中对应的方程是
+
+$$
+\begin{aligned}
+P &= (1-K)P \\
+&= (1-\frac{P}{P+R})P \\
+&= (\frac{P+R}{P+R}-\frac{P}{P+R})P \\
+&= (\frac{P+R-P}{P+R})P \\
+&= \frac{RP}{P+R}\\
+&= \frac{1}{\frac{P+R}{RP}}\\
+&= \frac{1}{\frac{R}{RP} + \frac{P}{RP}} \\
+&= \frac{1}{\frac{1}{P} + \frac{1}{R}}
+\quad\blacksquare
+\end{aligned}
+$$
+
+我们已经证明，当只有一个状态变量时，多元方程与一元方程是等价的。最后我要承认一个小瑕疵——我在断言 $H=1$ 和 $F=1$ 时是一笔带过的。一般来说，我们知道这并不成立。例如，数字温度计可能以伏特为单位给出测量值，我们需要把它转换为温度，而这个转换就用 $H$ 来完成。我略去了这个问题，是为了让解释尽可能简单流畅。把这种推广加入上面的方程、重新做一遍代数推导、并仍然得到相同的结果，是非常直接的。\\\

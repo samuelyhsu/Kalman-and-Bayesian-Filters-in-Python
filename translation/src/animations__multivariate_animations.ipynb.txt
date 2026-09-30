@@ -1,0 +1,6 @@
+=====CELL 1=====
+This notebook creates the animations for the Multivariate Kalman Filter chapter. It is not really intended to be a readable part of the book, but of course you are free to look at the source code, and even modify it. However, if you are interested in running your own animations, I'll point you to the examples subdirectory of the book, which contains a number of python scripts that you can run and modify from an IDE or the command line. This module saves the animations to GIF files, which is quite slow and not very interactive. 
+=====CELL 4=====
+<img src='multivariate_ellipse.gif'>
+=====CELL 6=====
+<img src='multivariate_track1.gif'>

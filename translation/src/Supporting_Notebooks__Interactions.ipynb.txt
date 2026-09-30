@@ -1,0 +1,51 @@
+=====CELL 1=====
+# Interactions
+
+This is a collection of interactions, mostly from the book. If you have are reading a print version of the book, or are reading it online via Github or nbviewer you will be unable to run the interactions.
+
+So I have created this notebook. Here is how you run an interaction if you do not have IPython installed on your computer.
+
+1. Go to try.juptyer.org in your browser. It will launch a temporary notebook server for you.
+
+2. Click the **New** button and select `Python 3`. This will create a new notebook that will run Python 3 for you in your browser.
+
+3. Copy the entire contents of a cell from this notebook and paste it into a 'code' cell in the notebook on your browser. 
+
+4. Press CTRL+ENTER to execute the cell.
+
+5. Have fun! Change code. Play. Experiment. Hack.
+
+Your server and notebook is not permanently saved. Once you close the session your data is lost. Yes, it says it is saving your file if you press save, and you can see it in the directory. But that is just happening in a Docker container that will be deleted as soon as you close the window. Copy and paste any changes you want to keep to an external file.
+
+Of course if you have IPython installed you can download this notebook and run it on your own computer. Type
+
+    ipython notebook
+    
+in a command prompt from the directory where you downloaded this file. Click on the name of this file to open it.
+=====CELL 2=====
+# Experimenting with FPF'
+
+
+The Kalman filter uses the equation $P^- = FPF^\mathsf{T}$ to compute the prior of the covariance matrix during the prediction step, where P is the covariance matrix and F is the system transistion function. For a Newtonian system $x = \dot{x}\Delta t + x_0$ F might look like
+
+$$F = \begin{bmatrix}1 & \Delta t\\0 & 1\end{bmatrix}$$
+
+$FPF^\mathsf{T}$ alters P by taking the correlation between the position ($x$) and velocity ($\dot{x}$). This interactive plot lets you see the effect of different designs of F has on this value. For example,
+
+* what if $x$ is not correlated to $\dot{x}$? (set F01 to 0)
+
+* what if $x = 2\dot{x}\Delta t + x_0$? (set F01 to 2)
+
+*  what if $x = \dot{x}\Delta t + 2*x_0$? (set F00 to 2)
+
+* what if $x = \dot{x}\Delta t$?  (set F00 to 0)
+=====CELL 4=====
+# Covariance Ellipse
+
+See the effect of varying the variances and covariance of a covariance matrix of the form
+
+$$\begin{bmatrix}\texttt{var}_x & \texttt{cov}_xy \\ \texttt{cov}_xy & \texttt{var}_y\end{bmatrix}$$
+=====CELL 6=====
+# g-h Filter
+
+Experiment with various values for g-h filter parameters.

@@ -1,0 +1,971 @@
+=====CELL 0=====
+[目录](./table_of_contents.ipynb)
+=====CELL 1=====
+# 无迹卡尔曼滤波器
+=====CELL 4=====
+在上一章中，我们讨论了非线性系统带来的困难。这种非线性可以出现在两个地方。它可以出现在我们的测量中，比如雷达测量到物体的斜距。斜距需要你取平方根来计算 x,y 坐标：
+
+$$x=\sqrt{\text{slant}^2 - \text{altitude}^2}$$
+
+非线性也可以出现在过程模型中——我们可能在跟踪一个在空气中飞行的球，其中空气阻力的影响导致非线性行为。标准的卡尔曼滤波器在这类问题上表现很差，或者根本不行。
+
+在上一章中，我给你看了这样一幅图。我对方程做了一些修改，以强调非线性的影响。
+=====CELL 6=====
+我是这样生成它的：从输入中取 500,000 个样本，让它们通过非线性变换，并对结果构建直方图。我们把这些点称为 *sigma 点*。根据输出的直方图，我们可以计算均值和标准差，这会给我们一个更新后的、尽管是近似的高斯分布。
+
+让我给你看这些数据在通过 `f(x)` 之前和之后的散点图。
+=====CELL 8=====
+数据本身看起来是高斯的，事实也是如此。我的意思是它看起来像散布在均值零附近的白噪声。相比之下，`g(data)` 有明确的结构。有两条带，两条带之间有大量的点。在带的外侧有零散的点，但负侧的点多得多。
+
+你也许已经想到，这个采样过程本身就构成了对我们问题的一个解决方案。假设每次更新我们都生成 500,000 个点，让它们通过函数，然后计算结果的均值和方差。这称为*蒙特卡洛*方法，一些卡尔曼滤波器设计使用它，比如集合滤波器和粒子滤波器。采样不需要专门知识，也不需要封闭形式的解。无论函数多么非线性或表现多差，只要我们用足够多的 sigma 点采样，我们就会构建出准确的输出分布。
+
+“足够多的点”是症结所在。上图是用 500,000 个 sigma 点创建的，输出仍然不平滑。更糟的是，这只是一维的情形。所需的点数随维数呈幂增长。如果一维只需要 500 个点，那么二维就需要 500 的平方，即 250,000 个点，三维需要 500 的立方，即 125,000,000 个点，依此类推。所以虽然这种方法确实有效，但计算代价非常高。集合滤波器和粒子滤波器使用巧妙的技术来显著降低这种维度的影响，但计算负担仍然非常大。无迹卡尔曼滤波器使用 sigma 点，但通过使用确定性方法来选择这些点，大幅减少了计算量。
+=====CELL 9=====
+## Sigma 点——从分布中采样
+=====CELL 10=====
+让我们用二维协方差椭圆来看这个问题。我选择二维仅仅是因为它容易绘图；这可以推广到任意维数。假设有某个任意的非线性函数，我们将从第一个协方差椭圆中取随机点，让它们通过非线性函数，并绘制它们的新位置。然后我们可以计算变换后点的均值和协方差，并把它用作我们对均值和概率分布的估计。
+=====CELL 12=====
+在左边，我们显示了一个椭圆，描绘两个状态变量的 $1\sigma$ 分布。箭头显示几个随机采样的点如何被某个任意的非线性函数变换到一个新的分布。右边的椭圆被画成半透明的，表示它是这组点的均值和方差的一个*估计*。
+=====CELL 13=====
+让我们编写一个函数，让从高斯分布
+
+$$\mu = \begin{bmatrix}0\\0\end{bmatrix},
+\Sigma=\begin{bmatrix}32&15\\15&40\end{bmatrix}$$
+
+中随机抽取的 10,000 个点通过非线性系统：
+
+$$\begin{cases}\begin{aligned}\bar x&=x+y\\
+\bar y&= 0.1x^2 + y^2\end{aligned} \end{cases}$$
+=====CELL 15=====
+这幅图显示了这个函数所具有的强非线性，以及如果我们按扩展卡尔曼滤波器的方式（我们将在下一章学习）做线性化会产生的大误差。
+=====CELL 16=====
+## 一个快速的例子
+
+我很快就要进入无迹卡尔曼滤波器 (UKF) 用来选择 sigma 点并进行计算的数学了。但让我们先从一个例子开始，这样你可以看到目的地，可以这么说。
+
+我们将了解到，UKF 可以使用许多不同的算法来生成 sigma 点。FilterPy 提供了几种算法。这是一种可能性：
+=====CELL 18=====
+这一点稍后会更清楚，但这个对象会为任何给定的均值和协方差生成带权重的 sigma 点。让我们看一个例子，其中点的大小表示它被赋予的权重有多大：
+=====CELL 20=====
+你可以看到我们有 5 个点，以奇怪的模式围绕均值 (3, 17) 分布。这样做会和 500,000 个随机生成的点一样好甚至更好，这似乎荒谬，但确实如此！
+
+好了，现在让我们实现滤波器。我们将在一维中实现一个标准的线性滤波器；我们还没有准备好处理非线性滤波器。滤波器的设计与我们到目前为止所学的没有太大不同，只有一处差异。KalmanFilter 类使用矩阵 $\mathbf F$ 来计算状态转移函数。矩阵意味着**线性**代数，它适用于线性问题，但不适用于非线性问题。所以，我们不提供矩阵，而是像上面那样提供函数。KalmanFilter 类使用另一个矩阵 $\mathbf H$ 来实现测量函数，它把状态转换为等价的测量值。同样，矩阵意味着线性，所以我们不提供矩阵，而是提供函数。也许现在就清楚为什么 $\mathbf H$ 被称为“测量函数”了；对于线性卡尔曼滤波器，它是一个矩阵，但那只是计算一个碰巧是线性的函数的快速方法。
+
+不再赘述，下面是一维跟踪问题的状态转移函数和测量函数，其中状态为 $\mathbf x = [x \, \, \dot x]^ \mathsf T$：
+=====CELL 22=====
+让我们说清楚，这是一个线性的例子。对线性问题没有必要使用 UKF，但我从最简单的例子开始。不过请注意，我把 `fx()` 写成用一组方程而不是矩阵乘法来计算 $\mathbf{\bar x}$。这是为了说明，我可以在这里实现任何任意的非线性函数；我们不受线性方程的约束。
+
+设计的其余部分是相同的。设计 $\mathbf P$、$\mathbf R$ 和 $\mathbf Q$。你知道如何做，所以让我们完成滤波器并运行它。
+=====CELL 24=====
+这里真的没有多少新东西。你必须创建一个为你生成 sigma 点的对象，并为 $\mathbf F$ 和 $\mathbf H$ 提供函数而不是矩阵，但其余的与以前相同。这应该给你足够的信心去啃一点数学和算法，以便理解 UKF 在做什么。
+=====CELL 25=====
+## 选择 Sigma 点
+
+在本章开头，我使用了 500,000 个随机生成的 sigma 点来计算通过非线性函数的高斯分布的概率分布。虽然计算出的均值相当准确，但每次更新都计算 500,000 个点会使我们的滤波器极其缓慢。那么，我们可以使用的采样点的最少数量是多少，这种问题表述对这些点施加了什么样的约束？我们将假设对非线性函数没有特殊知识，因为我们想找到一个适用于任何函数的通用算法。
+
+让我们考虑最简单的情形，看看它是否能提供一些洞见。最简单的系统是**恒等函数**：$f(x) = x$。如果我们的算法对恒等函数不起作用，那么滤波器就无法收敛。换句话说，如果输入是 1（对于一维系统），输出也必须是 1。如果输出不同，比如 1.1，那么当我们在下一个时间步把 1.1 送入变换时，我们会得到另一个数，也许是 1.23。这个滤波器就发散了。
+
+我们可以使用的最少点数是每个维度一个。这是线性卡尔曼滤波器使用的数量。对于分布 $\mathcal{N}(\mu,\sigma^2)$，卡尔曼滤波器的输入是 $\mu$ 本身。所以虽然这对线性情形有效，但对非线性情形并不是好答案。
+
+也许我们可以每个维度使用一个点，但以某种方式改变它。然而，如果我们把某个值 $\mu+\Delta$ 传入恒等函数 $f(x)=x$，它就不会收敛，所以这行不通。如果我们不改变 $\mu$，那就是标准的卡尔曼滤波器。我们必须得出结论：一个样本行不通。
+
+我们可以选择的下一个最小的数是什么？两个。考虑这样一个事实：高斯分布是对称的，而且我们可能希望总是让我们的一个样本点是输入的均值，这样恒等函数才能起作用。两个点会要求我们选择均值，再加一个别的点。那另一个点会给我们的输入引入不对称性，而这可能是我们不想要的。要使它对恒等函数 $f(x)=x$ 起作用会非常困难。
+
+再下一个最小的数是 3 个点。3 个点使我们可以选择均值，再在均值的每一侧各选一个点，如下图所示。
+=====CELL 27=====
+我们可以让这些点通过非线性函数 f(x)，并计算得到的均值和方差。均值可以计算为 3 个点的平均，但那不够通用。例如，对于非常非线性的问题，我们可能想让中心点的权重比外侧的点高得多，或者我们可能想让外侧点的权重更高。
+
+一种更通用的方法是计算加权均值 $\mu = \sum_i w_i\, f(\mathcal{X}_i)$，其中花体的 $\mathcal{X}$ 是 sigma 点。我们需要权重之和等于一。有了这个要求，我们的任务就是选择 $\mathcal{X}$ 及其对应的权重，使它们计算出变换后 sigma 点的均值和方差。
+
+如果我们给均值加权，那么给协方差加权也是合理的。可以对均值 ($w^m$) 和协方差 ($w^c$) 使用不同的权重。我使用上标，以便在下面的方程中为索引留出空间。我们可以写出
+
+$$\begin{aligned}
+\mathbf{Constraints:}\\
+1 &= \sum_i{w_i^m} \\
+1 &= \sum_i{w_i^c} \\
+\mu &= \sum_i w_i^mf(\mathcal{X}_i) \\
+\Sigma &= \sum_i w_i^c{(f(\mathcal{X})_i-\mu)(f(\mathcal{X})_i-\mu)^\mathsf{T}}
+\end{aligned}
+$$
+
+前两个方程是权重之和必须为一的约束。第三个方程是你计算加权均值的方式。第四个方程可能不那么熟悉，但回想一下，两个随机变量的协方差的方程是：
+
+$$COV(x,y) = \frac{\sum(x-\bar x)(y-\bar{y})}{n}$$
+
+这些约束并不构成唯一解。例如，如果你把 $w^m_0$ 减小，你可以通过增大 $w^m_1$ 和 $w^m_2$ 来补偿。你可以对均值和协方差使用不同的权重，也可以使用相同的权重。事实上，这些方程根本不要求任何一个点是输入的均值，尽管这样做似乎“很好”，可以这么说。
+
+我们想要一个满足这些约束的算法，最好每个维度只有 3 个点。在继续之前，我想确保这个想法是清楚的。下面是同一个协方差椭圆的三个不同例子，使用不同的 sigma 点。sigma 点的大小与赋予每个点的权重成正比。
+=====CELL 29=====
+这些点并不落在椭圆的长轴和短轴上；约束中没有任何东西要求我这样做。我显示的点是均匀分布的，但约束并不要求这样。
+
+sigma 点的排列和加权会影响我们对分布的采样方式。靠得很近的点会对局部效应采样，因此对非常非线性的问题可能效果更好。相距很远的点，或远离椭圆轴线的点，会对非局部效应和非高斯行为采样。然而，通过改变赋予每个点的权重，我们可以减轻这一点。如果点远离均值但权重很小，我们就纳入了一些关于分布的知识，而不会让问题的非线性造成糟糕的估计。
+
+请理解，选择 sigma 点的方式有无穷多种。我选择的约束只是其中一种做法。例如，并非所有创建 sigma 点的算法都要求权重之和为一。事实上，我在本书中偏爱的算法就不具备这个性质。
+=====CELL 30=====
+## 无迹变换
+
+暂时假设存在一个选择 sigma 点和权重的算法。sigma 点如何用来实现滤波器？
+
+*无迹变换*是算法的核心，但它非常简单。它让 sigma 点 $\boldsymbol{\chi}$ 通过非线性函数，产生一组变换后的点。
+
+$$\boldsymbol{\mathcal{Y}} = f(\boldsymbol{\chi})$$
+
+然后它计算变换后点的均值和协方差。这个均值和协方差就成为新的估计。下图描绘了无迹变换的操作。右边的绿色椭圆表示对变换后 sigma 点计算出的均值和协方差。
+=====CELL 32=====
+sigma 点的均值和协方差计算为：
+
+$$\begin{aligned}
+\mu &= \sum_{i=0}^{2n} w^m_i\boldsymbol{\mathcal{Y}}_i \\
+\Sigma &= \sum_{i=0}^{2n} w^c_i{(\boldsymbol{\mathcal{Y}}_i-\mu)(\boldsymbol{\mathcal{Y}}_i-\mu)^\mathsf{T}}
+\end{aligned}
+$$
+
+这些方程应该很熟悉——它们就是我们在上面推导的约束方程。
+
+简而言之，无迹变换取从某个任意概率分布中采样的点，让它们通过任意的非线性函数，并为变换后的点产生一个高斯分布。我希望你能设想，我们如何用它来实现非线性卡尔曼滤波器。一旦我们有了高斯分布，我们已经发展出的所有数学工具就都能派上用场了！
+
+“无迹”(unscented) 这个名字可能令人困惑。它其实没有多大意义。这是发明者的一个玩笑，说他的算法没有“臭味”(stink)，很快这个名字就叫开了。这个术语没有数学意义。
+=====CELL 33=====
+### 无迹变换的精度
+
+前面我们编写了一个函数，通过让 50,000 个点通过非线性函数来求分布的均值。现在让我们让 5 个 sigma 点通过同一个函数，并用无迹变换计算它们的均值。我们将使用 FilterPy 的函数 *MerweScaledSigmaPoints()* 来创建 sigma 点，用 `unscented_transform` 来执行变换；我们稍后会学习这些函数。在本章的第一个例子中，我使用了 `JulierSigmaPoints`；它们都选择 sigma 点，但方式不同，我稍后会解释。
+=====CELL 35=====
+我觉得这个结果了不起。仅用 5 个点，我们就能以惊人的精度计算出均值。x 中的误差只有 -0.097，y 中的误差是 0.549。相比之下，线性化的方法（EKF 使用的，我们将在下一章学习）在 y 中的误差超过 43。如果你看一下生成 sigma 点的代码，你会看到它对非线性函数一无所知，只知道我们初始分布的均值和协方差。如果我们有一个完全不同的非线性函数，也会生成同样的 5 个 sigma 点。
+
+我承认我选择了一个使无迹变换的表现与 EKF 相比显得惊人的非线性函数。但物理世界充满了非常非线性的行为，而 UKF 对此泰然处之。我并没有“费力”去找一个恰好使无迹变换表现良好的函数。你将在下一章看到，更传统的技术在面对强非线性时是如何挣扎的。这幅图是我建议你尽可能使用 UKF 或类似的现代技术的根本原因。
+=====CELL 36=====
+## 无迹卡尔曼滤波器
+
+现在我们可以给出 UKF 算法了。
+=====CELL 37=====
+### 预测步骤
+
+UKF 的预测步骤使用过程模型 $f()$ 计算先验。$f()$ 被假定为非线性的，所以我们根据某个函数生成 sigma 点 $\mathcal{X}$ 及其对应的权重 $W^m, W^c$：
+
+$$\begin{aligned}
+\boldsymbol\chi &= \text{sigma-function}(\mathbf x, \mathbf P) \\
+W^m, W^c &= \text{weight-function}(\mathtt{n, parameters})\end{aligned}$$
+
+我们让每个 sigma 点通过 $f(\mathbf x, \Delta t)$。这根据过程模型把 sigma 点在时间上向前投影，形成新的先验，它是一组我们命名为 $\boldsymbol{\mathcal Y}$ 的 sigma 点：
+
+$$\boldsymbol{\mathcal{Y}} = f(\boldsymbol{\chi}, \Delta t)$$
+
+我们对变换后的 sigma 点使用*无迹变换*来计算先验的均值和协方差。
+
+$$\mathbf{\bar x}, \mathbf{\bar P} =
+UT(\mathcal{Y}, w_m, w_c, \mathbf Q)$$
+
+这些是无迹变换的方程：
+
+$$\begin{aligned}
+\mathbf{\bar x} &= \sum_{i=0}^{2n} w^m_i\boldsymbol{\mathcal Y}_i \\
+\mathbf{\bar P} &= \sum_{i=0}^{2n} w^c_i({\boldsymbol{\mathcal Y}_i - \mathbf{\bar x})(\boldsymbol{\mathcal Y}_i-\mathbf{\bar x})^\mathsf{T}} + \mathbf Q
+\end{aligned}
+$$
+
+这个表格比较了线性卡尔曼滤波器与无迹卡尔曼滤波器的方程。为了可读性，我省去了下标 $i$。
+
+$$\begin{array}{l|l}
+\text{Kalman} & \text{Unscented} \\
+\hline
+& \boldsymbol{\mathcal Y} = f(\boldsymbol\chi) \\
+\mathbf{\bar x} = \mathbf{Fx} &
+\mathbf{\bar x} = \sum w^m\boldsymbol{\mathcal Y}  \\
+\mathbf{\bar P} = \mathbf{FPF}^\mathsf T + \mathbf Q  &
+\mathbf{\bar P} = \sum w^c({\boldsymbol{\mathcal Y} - \mathbf{\bar x})(\boldsymbol{\mathcal Y} - \mathbf{\bar x})^\mathsf T}+\mathbf Q
+\end{array}$$
+=====CELL 38=====
+### 更新步骤
+
+卡尔曼滤波器在测量空间中执行更新。因此，我们必须使用你定义的测量函数 $h(x)$ 把先验的 sigma 点转换成测量值。
+
+$$\boldsymbol{\mathcal{Z}} = h(\boldsymbol{\mathcal{Y}})$$
+
+我们使用无迹变换计算这些点的均值和协方差。下标 $z$ 表示这些是测量 sigma 点的均值和协方差。
+
+$$\begin{aligned}
+\boldsymbol\mu_z, \mathbf P_z &=
+UT(\boldsymbol{\mathcal Z}, w_m, w_c, \mathbf R) \\
+\boldsymbol\mu_z &= \sum_{i=0}^{2n} w^m_i\boldsymbol{\mathcal Z}_i \\
+\mathbf P_z &= \sum_{i=0}^{2n} w^c_i{(\boldsymbol{\mathcal Z}_i-\boldsymbol{\mu}_z)(\boldsymbol{\mathcal Z}_i-\boldsymbol{\mu}_z)^\mathsf T} + \mathbf R
+\end{aligned}
+$$
+
+接下来我们计算残差和卡尔曼增益。测量值 $\mathbf z$ 的残差很容易计算：
+
+$$\mathbf y = \mathbf z - \boldsymbol\mu_z$$
+
+要计算卡尔曼增益，我们首先计算状态和测量值的[互协方差](https://en.wikipedia.org/wiki/Cross-covariance)，其定义为：
+
+$$\mathbf P_{xz} =\sum_{i=0}^{2n} w^c_i(\boldsymbol{\mathcal Y}_i-\mathbf{\bar x})(\boldsymbol{\mathcal Z}_i-\boldsymbol\mu_z)^\mathsf T$$
+
+然后卡尔曼增益定义为
+
+$$\mathbf{K} = \mathbf P_{xz} \mathbf P_z^{-1}$$
+
+如果你把逆看作*某种*矩阵倒数，你就能看出卡尔曼增益是一个简单的比值，它计算的是：
+
+$$\mathbf{K} \approx \frac{\mathbf P_{xz}}{\mathbf P_z}
+\approx \frac{\text{belief in state}}{\text{belief in measurement}}$$
+
+最后，我们用残差和卡尔曼增益计算新的状态估计：
+
+$$\mathbf x = \bar{\mathbf x} + \mathbf{Ky}$$
+
+新的协方差计算为：
+
+$$ \mathbf P = \mathbf{\bar P} - \mathbf{KP_z}\mathbf{K}^\mathsf{T}$$
+
+这一步包含几个你必须凭信念接受的方程，但你应该能看出它们与线性卡尔曼滤波器方程的关系。线性代数与线性卡尔曼滤波器略有不同，但算法与我们在全书中一直实现的贝叶斯算法相同。
+
+这个表格比较了线性 KF 和 UKF 的方程。
+
+$$\begin{array}{l|l}
+\textrm{Kalman Filter} & \textrm{Unscented Kalman Filter} \\
+\hline
+& \boldsymbol{\mathcal Y} = f(\boldsymbol\chi) \\
+\mathbf{\bar x} = \mathbf{Fx} &
+\mathbf{\bar x} = \sum w^m\boldsymbol{\mathcal Y}  \\
+\mathbf{\bar P} = \mathbf{FPF}^\mathsf T+\mathbf Q  &
+\mathbf{\bar P} = \sum w^c({\boldsymbol{\mathcal Y} - \mathbf{\bar x})(\boldsymbol{\mathcal Y} - \mathbf{\bar x})^\mathsf T}+\mathbf Q \\
+\hline
+& \boldsymbol{\mathcal Z} =  h(\boldsymbol{\mathcal{Y}}) \\
+& \boldsymbol\mu_z = \sum w^m\boldsymbol{\mathcal{Z}} \\
+\mathbf y = \mathbf z - \mathbf{Hx} &
+\mathbf y = \mathbf z - \boldsymbol\mu_z \\
+\mathbf S = \mathbf{H\bar PH}^\mathsf{T} + \mathbf R &
+\mathbf P_z = \sum w^c{(\boldsymbol{\mathcal Z}-\boldsymbol\mu_z)(\boldsymbol{\mathcal{Z}}-\boldsymbol\mu_z)^\mathsf{T}} + \mathbf R \\
+\mathbf K = \mathbf{\bar PH}^\mathsf T \mathbf S^{-1} &
+\mathbf K = \left[\sum w^c(\boldsymbol{\mathcal Y}-\bar{\mathbf x})(\boldsymbol{\mathcal{Z}}-\boldsymbol\mu_z)^\mathsf{T}\right] \mathbf P_z^{-1} \\
+\mathbf x = \mathbf{\bar x} + \mathbf{Ky} & \mathbf x = \mathbf{\bar x} + \mathbf{Ky}\\
+\mathbf P = (\mathbf{I}-\mathbf{KH})\mathbf{\bar P} & \mathbf P = \bar{\mathbf P} - \mathbf{KP_z}\mathbf{K}^\mathsf{T}
+\end{array}$$
+=====CELL 39=====
+## Van der Merwe 的缩放 Sigma 点算法
+
+选择 sigma 点有许多算法。大约从 2005 年起，研究界和产业界基本上都采用了 Rudolph Van der Merwe 在他 2004 年博士论文 [1] 中发表的版本。它在各种问题上表现良好，在性能和精度之间有很好的折中。它是对 Simon J. Julier 发表的*缩放无迹变换* [2] 的一个轻微重新表述。
+
+这种表述使用 3 个参数来控制 sigma 点如何分布和加权：$\alpha$、$\beta$ 和 $\kappa$。在推导方程之前，让我们看一个例子。我将把 sigma 点画在显示第一和第二标准差的协方差椭圆上，并根据均值权重来缩放这些点。
+=====CELL 41=====
+我们可以看到 sigma 点位于第一和第二标准差之间，而且更大的 $\alpha$ 使点分布得更开。此外，更大的 $\alpha$ 给均值（中心点）的权重比较小的 $\alpha$ 更高，给其余点的权重更低。这应该符合我们的直觉——点离均值越远，我们给它的权重就应该越小。我们还不知道这些权重和 sigma 点是如何选择的，但这些选择看起来是合理的。
+=====CELL 42=====
+### Sigma 点的计算
+
+第一个 sigma 点是输入的均值。这是上图中显示在椭圆中心的 sigma 点。我们把它称为 $\boldsymbol{\chi}_0$。
+
+$$ \mathcal{X}_0 = \mu$$
+
+为了记号方便，我们定义 $\lambda = \alpha^2(n+\kappa)-n$，其中 $n$ 是 $\mathbf x$ 的维数。其余的 sigma 点计算为
+
+$$
+\boldsymbol{\chi}_i = \begin{cases}
+\mu + \left[ \sqrt{(n+\lambda)\Sigma}\right ]_{i}& i=1..n \\
+\mu - \left[ \sqrt{(n+\lambda)\Sigma}\right]_{i-n} &i=(n+1)..2n\end{cases}
+$$
+下标 $i$ 选择矩阵的第 i$^{th}$ 个行向量。
+
+换句话说，我们用一个常数缩放协方差矩阵，取它的平方根，并通过对均值既加又减它来确保对称性。我们稍后将讨论如何取矩阵的平方根。
+
+### 权重的计算
+
+这种表述对均值使用一组权重，对协方差使用另一组权重。$\mathcal{X}_0$ 的均值权重计算为
+
+$$W^m_0 = \frac{\lambda}{n+\lambda}$$
+
+$\mathcal{X}_0$ 的协方差权重是
+
+$$W^c_0 = \frac{\lambda}{n+\lambda} + 1 -\alpha^2 + \beta$$
+
+其余 sigma 点 $\boldsymbol{\chi}_1 ... \boldsymbol{\chi}_{2n}$ 的权重对均值和协方差是相同的。它们是
+
+$$W^m_i = W^c_i = \frac{1}{2(n+\lambda)}\;\;\;i=1..2n$$
+
+为什么这是“正确的”可能并不显而易见，事实上，无法证明这对所有非线性问题都是理想的。但你可以看到，我们选择的 sigma 点与协方差矩阵的平方根成正比，而方差的平方根是标准差。所以，sigma 点大致按 $\pm 1\sigma$ 乘以某个缩放因子分布。分母中有一个 $n$ 项，所以维数越多，点分布得越开，权重也越小。
+
+**重要说明：**通常这些权重之和不为一。我收到很多关于这一点的问题。得到之和大于一、甚至为负值的权重是预料之中的。我会在下面更详细地讨论这一点。
+
+
+### 参数的合理选择
+
+对高斯问题，$\beta=2$ 是好的选择，$\kappa=3-n$（其中 $n$ 是 $\mathbf x$ 的维数）是 $\kappa$ 的好选择，$0 \le \alpha \le 1$ 是 $\alpha$ 的合适选择，其中 $\alpha$ 的值越大，sigma 点离均值越远。
+=====CELL 43=====
+## 使用 UKF
+
+让我们解决一些问题，这样你可以对 UKF 有多么易用建立信心。我们将从一个你已经知道如何用线性卡尔曼滤波器求解的线性问题开始。尽管 UKF 是为非线性问题设计的，但对线性问题它能找到与线性卡尔曼滤波器相同的最优结果。我们将编写一个滤波器，用匀速模型在二维中跟踪一个物体。这将让我们专注于 UKF 中相同的部分（大部分是相同的！）和不同的部分。
+
+设计卡尔曼滤波器需要你指定 $\bf{x}$、$\bf{F}$、$\bf{H}$、$\bf{R}$ 和 $\bf{Q}$ 矩阵。我们已经做过很多次，所以我会不做太多讨论就给出这些矩阵。我们想要匀速模型，所以我们把 $\bf{x}$ 定义为
+
+$$ \mathbf x = \begin{bmatrix}x &  \dot x & y & \dot y \end{bmatrix}^\mathsf{T}$$
+
+用这种状态变量的排序，状态转移矩阵是
+
+$$\mathbf F = \begin{bmatrix}1 & \Delta t & 0 & 0 \\
+0&1&0&0 \\
+0&0&1&\Delta t\\
+0&0&0&1
+\end{bmatrix}$$
+
+它实现了牛顿方程
+
+$$\begin{aligned}
+x_k &= x_{k-1} + \dot x_{k-1}\Delta t \\
+y_k &= y_{k-1} + \dot y_{k-1}\Delta t
+\end{aligned}$$
+
+我们的传感器提供位置而不是速度，所以测量函数是
+
+$$\mathbf H = \begin{bmatrix}1&0&0&0 \\ 0&0&1&0
+\end{bmatrix}$$
+
+传感器读数以米为单位，在 *x* 和 *y* 中的误差都是 $\sigma=0.3$ 米。这给出测量噪声矩阵
+
+$$\mathbf R = \begin{bmatrix}0.3^2 &0\\0 & 0.3^2\end{bmatrix}$$
+
+最后，让我们假设过程噪声可以用离散白噪声模型表示——即在每个时间段内加速度是恒定的。我们可以用 `FilterPy` 的 `Q_discrete_white_noise()` 为我们创建这个矩阵，但为了复习，这个矩阵是
+
+$$\mathbf Q = \begin{bmatrix}
+\frac{1}{4}\Delta t^4 & \frac{1}{2}\Delta t^3 \\
+\frac{1}{2}\Delta t^3 & \Delta t^2\end{bmatrix} \sigma^2$$
+
+我对这个滤波器的实现是：
+=====CELL 45=====
+这对你应该没有任何意外。现在让我们实现 UKF。同样，这纯粹是出于教学目的；对线性问题使用 UKF 没有任何好处。`FilterPy` 用 `UnscentedKalmanFilter` 类实现了 UKF。
+
+首先要做的是实现函数 `f(x, dt)` 和 `h(x)`。`f(x, dt)` 实现状态转移函数，`h(x)` 实现测量函数。它们对应于线性滤波器中的矩阵 $\mathbf F$ 和 $\mathbf H$。
+
+下面是这两个函数的一个合理实现。每个函数都应返回包含结果的一维 NumPy 数组或列表。你可以给它们起比 `f` 和 `h` 更易读的名字。
+=====CELL 47=====
+接下来你要指定如何计算 sigma 点和权重。我们在上面给出了 Van der Merwe 的版本，但有许多不同的选择。FilterPy 使用一个名为 `SigmaPoints` 的类，它必须实现一个方法：
+
+```python
+def sigma_points(self, x, P)
+```
+
+并包含属性 `Wm` 和 `Wc`，分别保存用于计算均值和协方差的权重。
+
+FilterPy 从 `SigmaPoints` 派生出 `MerweScaledSigmaPoints` 类，并实现了上述方法。
+
+当你创建 UKF 时，你会传入 $f()$ 和 $h()$ 函数以及 sigma 点对象，如下例所示：
+
+```python
+from filterpy.kalman import MerweScaledSigmaPoints
+from filterpy.kalman import UnscentedKalmanFilter as UKF
+
+points = MerweScaledSigmaPoints(n=4, alpha=.1, beta=2., kappa=-1)
+ukf = UKF(dim_x=4, dim_z=2, fx=f_cv, hx=h_cv, dt=dt, points=points)
+```
+
+其余的代码与线性卡尔曼滤波器相同。我将使用相同的测量值，并计算两个解之差的标准差。
+=====CELL 49=====
+这给了我 0.013 米的标准差，相当小。
+
+UKF 的实现与线性卡尔曼滤波器没有太大不同。你不是把状态转移和测量函数实现为矩阵 $\mathbf F$ 和 $\mathbf H$，而是提供非线性函数 `f()` 和 `h()`。其余的理论和实现保持不变。实现 `predict()` 和 `update()` 的代码有所不同，但从设计者的角度来看，问题的表述和滤波器的设计非常相似。
+=====CELL 50=====
+## 跟踪一架飞机
+
+让我们处理第一个非线性问题。我们将编写一个滤波器，使用雷达作为传感器来跟踪一架飞机。为了使问题尽可能与前一个相似，我们将在二维中跟踪。我们将跟踪地面上的一个维度和飞机的高度。每个维度是独立的，所以我们这样做不会失去一般性。
+
+雷达的工作原理是发射无线电波或微波。波束路径上的任何东西都会把一部分信号反射回雷达。通过测量反射信号返回所需的时间，它可以计算到目标的*斜距*。斜距是从雷达到物体的直线距离。方位是利用天线的*方向性增益*计算的。
+
+我们根据斜距和仰角计算飞机的 (x,y) 位置，如这幅图所示：
+=====CELL 52=====
+*仰角* $\epsilon$ 是地面所形成的视线之上的角度。
+
+我们将假设飞机在恒定高度飞行。因此我们有一个三变量的状态向量：
+
+$$\mathbf x = \begin{bmatrix}\mathtt{distance} \\\mathtt{velocity}\\ \mathtt{altitude}\end{bmatrix}=    \begin{bmatrix}x \\ \dot x\\ y\end{bmatrix}$$
+=====CELL 53=====
+状态转移函数是线性的
+
+$$\mathbf{\bar x} = \begin{bmatrix} 1 & \Delta t & 0 \\ 0& 1& 0 \\ 0&0&1\end{bmatrix}
+\begin{bmatrix}x \\ \dot x\\ y\end{bmatrix}
+$$
+
+可以这样计算：
+=====CELL 55=====
+接下来我们设计测量函数。和线性卡尔曼滤波器中一样，测量函数把滤波器的先验转换成测量值。我们需要把飞机的位置和速度转换成距雷达站的仰角和距离。
+
+距离用勾股定理计算：
+
+$$\text{range} = \sqrt{(x_\text{ac} - x_\text{radar})^2 + (y_\text{ac} - y_\mathtt{radar})^2}$$
+
+仰角 $\epsilon$ 是 $y/x$ 的反正切：
+
+$$\epsilon = \tan^{-1}{\frac{y_\mathtt{ac} - y_\text{radar}}{x_\text{ac} - x_\text{radar}}}$$
+
+我们需要定义一个 Python 函数来计算它。我会利用函数可以拥有变量这一事实来存储雷达的位置。虽然这对这个问题不是必需的（我们可以把值硬编码，或者使用全局变量），但这使函数更加灵活。
+=====CELL 57=====
+有一个我们没有考虑的非线性，即角度是模的。残差是测量值与投影到测量空间的先验之差。359° 与 1° 之间的角度差是 2°，但 359° - 1° = 358°。UKF 在无迹变换中计算加权值之和，这使这一问题更加严重。目前我们会把传感器和目标放在避开这些非线性区域的位置。稍后我会向你展示如何处理这个问题。
+
+我们需要模拟雷达和飞机。到现在这应该已经成为你的第二本能了，所以我不加讨论地给出代码。
+=====CELL 59=====
+军用级雷达可达到 1 米 RMS 的距离精度，以及仰角 1 mrad 的 RMS 精度 [3]。我们将假设更为一般的 5 米距离精度和 0.5° 角度精度，因为这为滤波器提供了更具挑战性的数据集。
+
+$\mathbf Q$ 的设计需要一些讨论。状态是 $\begin{bmatrix}x & \dot x & y\end{bmatrix}^\mathtt{T}$。前两个元素是沿雷达方向的水平距离和速度，所以我们可以使用 `Q_discrete_white_noise` 来计算 Q 左上部分的值。第三个元素是高度，我们假设它与 $x$ 无关。这就得到 $\mathbf Q$ 的分块设计：
+
+$$\mathbf Q = \begin{bmatrix}\mathbf Q_\mathtt{x} & \boldsymbol 0 \\ \boldsymbol 0 & Q_\mathtt{y}\end{bmatrix}$$
+
+我将从飞机位于雷达站正上方、以 100 米/秒飞行开始。典型的测高雷达可能每 3 秒才更新一次，所以我们将用它作为我们的历元周期。
+=====CELL 61=====
+这也许给你留下深刻印象，也许没有，但我很受触动！在扩展卡尔曼滤波器一章中，我们将解决同一个问题，但那将需要大量的数学。
+=====CELL 62=====
+### 跟踪机动飞机
+=====CELL 63=====
+前面的例子产生了良好的结果，但它假设飞机不改变高度。如果飞机在一分钟后开始爬升，滤波器的结果如下。
+=====CELL 65=====
+滤波器无法跟踪变化的高度。我们的设计中需要改变什么？
+
+我希望你回答的是“把爬升率加入状态”，像这样：
+
+
+$$\mathbf x = \begin{bmatrix}\mathtt{distance} \\\mathtt{velocity}\\ \mathtt{altitude} \\ \mathtt{climb\, rate}\end{bmatrix}=  \begin{bmatrix}x \\\dot x\\ y \\ \dot y\end{bmatrix}$$
+
+这要求对状态转移函数做如下改变，它仍然是线性的。
+
+$$\mathbf{F} = \begin{bmatrix} 1 & \Delta t & 0 &0 \\ 0& 1& 0 &0\\ 0&0&1&\Delta t \\ 0&0&0&1\end{bmatrix}
+\begin{bmatrix}x \\\dot x\\ y\\ \dot y\end{bmatrix}
+$$
+
+测量函数保持不变，但我们必须改变 $\mathbf Q$ 以考虑 $\mathbf x$ 维数的变化。
+=====CELL 68=====
+高度估计中引入了大量噪声，但我们现在准确地跟踪了高度。
+=====CELL 69=====
+### 传感器融合
+=====CELL 70=====
+现在让我们考虑一个传感器融合的例子。我们有某种多普勒系统，它产生 RMS 精度为 2 米/秒的速度估计。我说“某种”，是因为和雷达一样，我并不是要教你如何为多普勒系统创建精确的滤波器。完整的实现必须考虑信噪比、大气效应、系统的几何结构等等。
+
+前面的例子中雷达的精度使我们能够把速度估计到一米/秒左右，我会降低这个精度来说明传感器融合的效果。让我们把距离误差改为 $\sigma=500$ 米，然后计算估计速度的标准差。我会跳过最初的几个测量值，因为滤波器在此期间正在收敛，会造成人为的大偏差。
+
+不使用多普勒时的标准差是：
+=====CELL 72=====
+对于多普勒，我们需要把 $x$ 和 $y$ 方向的速度纳入测量。`ACSim` 类把速度存储在数据成员 `vel` 中。要执行卡尔曼滤波器的更新，我们只需要用一个包含斜距、仰角以及 $x$ 和 $y$ 方向速度的列表调用 `update`：
+
+$$z = [\mathtt{slant\_range},\, \text{elevation angle},\, \dot x,\, \dot y]$$
+
+测量值包含四个值，所以测量函数也需要返回四个值。斜距和仰角将像以前一样计算，而我们不需要计算 $x$ 和 $y$ 方向的速度，因为它们由状态估计提供。
+=====CELL 74=====
+现在我们可以实现我们的滤波器了。
+=====CELL 76=====
+通过纳入速度传感器，我们能够把标准差从 3.5 米/秒降低到 1.3 米/秒。
+
+传感器融合是一个庞大的主题，而这是一个相当简单化的实现。在典型的导航问题中，我们有提供*互补*信息的传感器。例如，GPS 可能每秒提供一次相当准确的位置更新，但速度估计很差，而惯性系统可能以 50Hz 提供非常准确的速度更新，但位置估计很糟糕。每种传感器的优缺点彼此正交。这就引出了*互补滤波器*，它把高更新率的惯性速度测量值与 GPS 准确但更新缓慢的位置估计混合，以产生高速率且准确的位置和速度估计。高速率的速度估计在 GPS 更新之间被积分，以产生准确的高速率位置估计。
+=====CELL 77=====
+### 多个位置传感器
+
+上一个传感器融合问题是个玩具例子。让我们处理一个不那么像玩具的问题。在 GPS 出现之前，船舶和飞机通过各种距离和方位系统导航，如 VOR、LORAN、TACAN、DME 等等。这些系统以无线电波的形式发射信标。传感器从信号中提取到信标的距离和/或方位。例如，飞机可能有两个 VOR 接收机。飞行员把每个接收机调谐到不同的 VOR 台。每个 VOR 接收机显示*径向线*——从地面上的 VOR 台到飞机的方向。飞行员用图表找到径向线的交点，从而确定飞机的位置。
+
+这是一种精度较低的手动方法。卡尔曼滤波器会产生准确得多的位置估计。假设我们有两个传感器，每个只提供到目标的方位测量值，如下图所示。这些边界的宽度与传感器噪声的 $3\sigma$ 成正比。飞机必须以很高的概率位于两个边界的交集内的某处。
+=====CELL 79=====
+我们把传感器与目标之间的方位计算为：
+=====CELL 81=====
+滤波器以向量的形式接收来自两个传感器的测量值。代码将接受任何可迭代容器，所以为了效率我使用 Python 列表。我们可以这样实现：
+=====CELL 83=====
+假设飞机为匀速模型。为了换换口味，我显式地计算新位置，而不是使用矩阵-向量乘法：
+=====CELL 85=====
+接下来我们实现测量函数。它把先验转换成一个包含到两个台站的测量值的数组。我不喜欢全局变量，但我把台站的位置放在全局变量 `sa_pos` 和 `sb_pos` 中，以演示这种与 $h()$ 共享数据的方法：
+=====CELL 87=====
+现在我们编写样板代码，它构造滤波器、运行它并绘制结果：
+=====CELL 89=====
+这在我看来相当不错。航迹开头有大的误差，但滤波器稳定下来，并产生了良好的估计。
+
+让我们重新审视角度的非线性。我将把目标放在两个传感器之间的 (0,0)。这会导致残差的计算出现非线性，因为平均角度将接近零。当角度低于 0 时，测量函数会计算出接近 $2\pi$ 的大正角。因此预测与测量值之间的残差将非常大，接近 $2\pi$，而不是接近 0。这使滤波器不可能准确地工作，如下面的例子所示。
+=====CELL 91=====
+这个性能是不可接受的。`FilterPy` 的 UKF 代码允许你指定一个函数，在这样的非线性行为的情况下计算残差。本章的最后一个例子演示了它的用法。
+=====CELL 92=====
+## 传感器误差与几何结构的影响
+=====CELL 93=====
+传感器相对于被跟踪物体的几何结构施加了一种物理限制，在设计滤波器时可能极难应对。如果 VOR 台的径向线几乎彼此平行，那么很小的角度误差就会转化成很大的距离误差。更糟的是，这种行为是非线性的——*x 轴*与 *y 轴*上的误差会随实际方位而变化。这些散点图显示了两种不同方位下 1°$\sigma$ 误差的误差分布。
+=====CELL 95=====
+## 习题：解释滤波器的性能
+=====CELL 96=====
+我们可以看到，对于小的角度误差，位置误差非常大。请解释我们在上面的目标跟踪问题中是如何从 UKF 得到相对良好的性能的。对单传感器和多传感器问题都要回答。
+=====CELL 97=====
+### 解答
+=====CELL 98=====
+这一点非常重要，需要理解。在阅读下面的答案之前，请努力尝试回答。如果你无法回答，可能需要重温**多维卡尔曼滤波器**一章中的一些早期内容。
+
+有几个因素促成了我们的成功。首先，让我们考虑只有一个传感器的情形。任何单个测量值的可能位置范围都极大。但是，我们的目标在移动，而 UKF 把这一点考虑在内。让我们绘制对一个移动目标连续进行的几次测量的结果。
+=====CELL 100=====
+每个单独的测量值都有很大的位置误差。然而，连续测量值的图显示出清晰的趋势——目标显然在向右上方移动。当卡尔曼滤波器计算卡尔曼增益时，它通过使用测量函数来考虑误差的分布。在这个例子中，误差位于大约 45° 的直线上，所以滤波器会打折扣地对待该方向上的误差。另一方面，与之正交的测量几乎没有误差，卡尔曼增益同样会考虑到这一点。
+
+这幅图让它看起来很容易，因为我们对每个位置更新绘制了 100 个测量值。飞机的运动是显而易见的。相比之下，卡尔曼滤波器每次更新只得到一个测量值。因此，滤波器无法生成像绿色虚线所暗示的那么好的拟合。
+
+现在考虑方位并没有给我们距离信息。假设我们把初始估计设置为距传感器 1,000 公里（而实际距离是 7.07 公里），并使 $\mathbf P$ 非常小。在那个距离上，1° 的误差转化为 17.5 公里的位置误差。KF 永远无法收敛到实际的目标位置，因为滤波器错误地对其位置估计非常确定，而且测量值中没有提供距离信息。
+=====CELL 101=====
+现在让我们考虑加入第二个传感器的效果。这里有两幅图，显示不同传感器布置的效果。我用方形和三角形作为两个传感器的符号，并用相同的符号形状和颜色画出每个传感器造成的误差分布。然后我计算了与两个带噪声的方位测量值对应的 $(x, y)$ 坐标，并用红点绘制出来，以显示带噪声的测量值在 $x$ 和 $y$ 中的分布。
+=====CELL 103=====
+在第一幅图中，我把传感器放置在几乎与目标初始位置正交的位置，所以我们得到这些可爱的“x”形交点。我们可以通过散布的红点所形成的形状，看出随着目标移动，$x$ 和 $y$ 中的误差如何变化——当目标离传感器越来越远，但更接近传感器 B 的 $y$ 坐标时，形状变得强烈地呈椭圆形。
+
+在第二幅图中，飞机一开始离一个传感器非常近，然后飞过第二个传感器。误差的交点非常不正交，得到的位置误差变得非常分散。
+=====CELL 104=====
+## UKF 的实现
+
+FilterPy 实现了 UKF，但学习如何把方程翻译成代码是有益的。实现 UKF 相当直接。首先，让我们编写代码来计算 sigma 点的均值和协方差。
+
+我们将把 sigma 点和权重存储在矩阵中，像这样：
+
+$$
+\begin{aligned}
+\text{weights} &=
+\begin{bmatrix}
+w_0& w_1 & \dots & w_{2n}
+\end{bmatrix}
+\\
+\text{sigmas} &=
+\begin{bmatrix}
+\mathcal{X}_{0,0} & \mathcal{X}_{0,1} & \dots & \mathcal{X}_{0,n-1} \\
+\mathcal{X}_{1,0} & \mathcal{X}_{1,1} &  \dots & \mathcal{X}_{1,n-1} \\
+\vdots & \vdots &  \ddots & \vdots \\
+\mathcal{X}_{2n,0} & \mathcal{X}_{2n,1} & \dots & \mathcal{X}_{2n,n-1}
+\end{bmatrix}
+\end{aligned}
+$$
+
+
+用这么多下标来描述非常简单的东西，所以这里是一个二维问题 ($n$=2) 的例子：
+=====CELL 106=====
+均值的 sigma 点在第一行。它的位置是 (0, 0)，等于均值 (0,0)。第二个 sigma 点的位置是 (0.173, 0.017)，依此类推。共有 $2n+1 = 5$ 行，每个 sigma 点一行。如果 $n=3$，就会有 3 列和 7 行。
+
+把 sigma 点存储成行-列格式还是列-行格式，在某种程度上是任意的；我的选择使其余的代码更清楚，因为我可以把第 i$^{th}$ 个 sigma 点写成 `sigmas[i]`，而不是 `sigmas[:, i]`。
+=====CELL 107=====
+### 权重
+
+用 NumPy 计算权重很容易。回想 Van der Merwe 缩放 sigma 点的实现表明：
+
+$$
+\begin{aligned}
+\lambda&=\alpha^2(n+\kappa)-n \\
+W^m_0 &= \frac{\lambda}{n+\lambda} \\
+W^c_0 &= \frac{\lambda}{n+\lambda} + 1 -\alpha^2 + \beta \\
+W^m_i = W^c_i &= \frac{1}{2(n+\lambda)}\;\;\;i=1..2n
+\end{aligned}
+$$
+
+它们的代码是：
+
+```python
+lambda_ = alpha**2 * (n + kappa) - n
+Wc = np.full(2*n + 1,  1. / (2*(n + lambda_))
+Wm = np.full(2*n + 1,  1. / (2*(n + lambda_))
+Wc[0] = lambda_ / (n + lambda_) + (1. - alpha**2 + beta)
+Wm[0] = lambda_ / (n + lambda_)
+```
+
+我在 `lambda_` 中使用下划线，因为 `lambda` 是 Python 的保留字。末尾加下划线是 Python 风格的变通办法。
+=====CELL 108=====
+### Sigma 点
+
+sigma 点的方程是：
+
+$$
+\begin{cases}
+\mathcal{X}_0 = \mu \\
+\mathcal{X}_i = \mu +  \left[\sqrt{(n+\lambda)\Sigma} \right]_i, & i=1..n \\
+\mathcal{X}_i = \mu - \left[\sqrt{(n+\lambda)\Sigma}\right]_{i-n} & i=(n+1)..2n
+\end{cases}
+$$
+
+一旦我们理解了 $\left[\sqrt{(n+\lambda)\Sigma}  \right]_i$ 这一项，Python 代码就不难了。
+
+项 $\sqrt{(n+\lambda)\Sigma}$ 是矩阵，因为 $\Sigma$ 是矩阵。$[\sqrt{(n+\lambda)\Sigma}]_i$ 中的下标 $i$ 选择矩阵的第 i 个行向量。矩阵的平方根是什么？没有唯一的定义。一种定义是，矩阵 $\Sigma$ 的平方根是矩阵 $S$，它与自身相乘得到 $\Sigma$：如果 $\Sigma = SS$，则 $S = \sqrt{\Sigma}$。
+
+我们将选择另一种定义，它具有使计算更容易的数值性质。我们可以把平方根定义为矩阵 S，它与自己的转置相乘时返回 $\Sigma$：
+
+$$
+\Sigma = \mathbf{SS}^\mathsf T
+$$
+
+这个定义受到青睐，是因为 $\mathbf S$ 是用[*乔列斯基分解*](https://en.wikipedia.org/wiki/Cholesky_decomposition) [5]计算的。它把厄米特正定矩阵分解为一个三角矩阵及其共轭转置。这个矩阵可以是上三角或下三角，像这样：
+
+$$A=LL^{∗} \\ A=U^{∗}U$$
+
+星号表示共轭转置；我们只有实数，所以对我们来说可以写成：
+
+$$A=LL^\mathsf T \\ A=U^\mathsf T U$$
+
+$\mathbf P$ 具有这些性质，所以我们可以把 $\mathbf S = \text{cholesky}(\mathbf P)$ 当作 $\mathbf P$ 的平方根。
+
+SciPy 在 `scipy.linalg` 中提供了 `cholesky()` 方法。如果你选择的语言是 Fortran、C 或 C++，像 LAPACK 这样的库提供了这个例程。Matlab 提供了 `chol()`。
+
+默认情况下 `scipy.linalg.cholesky()` 返回上三角矩阵，所以我选择把代码写成期望上三角矩阵。因此，我按行访问结果，使得第一个 sigma 点，即中心点，受到一整行非零值的影响。如果你提供自己的平方根实现，就需要考虑到这一点。你会在文献中发现先取列的 UKF 算法。如果乔列斯基分解是下三角的，或者你使用的是计算对称矩阵的另一种算法，行列顺序就无关紧要，这样做也没问题。
+=====CELL 110=====
+所以我们可以用这段代码实现 sigma 点：
+
+```python
+sigmas = np.zeros((2*n+1, n))
+U = scipy.linalg.cholesky((n+lambda_)*P) # sqrt
+
+sigmas[0] = X
+for k in range (n):
+    sigmas[k+1]   = X + U[k]
+    sigmas[n+k+1] = X - U[k]
+```
+
+现在让我们实现无迹变换。回想方程
+
+$$\begin{aligned}
+\mu &= \sum_i w_i^m\mathcal{X}_i \\
+\Sigma &= \sum_i w_i^c{(\mathcal{X}_i-\mu)(\mathcal{X}_i-\mu)^\mathsf{T}}
+\end{aligned}
+$$
+
+我们用下面的代码实现均值的求和
+
+```python
+x = np.dot(Wm, sigmas)
+```
+
+如果你不是 NumPy 的重度用户，这看起来可能有些陌生。NumPy 不仅仅是使线性代数成为可能的库；它的底层是用 C 和 Fortran 编写的，以达到比 Python 快得多的速度。典型的加速是 20 倍到 100 倍。要获得这种加速，我们必须避免使用 for 循环，而是使用 NumPy 的内置函数来进行计算。所以，我们不写 for 循环来计算乘积之和，而是调用内置的 `numpy.dot(x, y)` 方法。两个向量的点积是每个元素逐元素相乘之和。如果传入一个一维数组和一个二维数组，它会计算内积之和：
+=====CELL 112=====
+剩下的就是计算 $\mathbf P = \sum_i w_i{(\mathcal{X}_i-\mu)(\mathcal{X}_i-\mu)^\mathsf{T}} + \mathbf Q$：
+
+```python
+kmax, n = sigmas.shape
+P = zeros((n, n))
+for k in range(kmax):
+    y = sigmas[k] - x
+    P += Wc[k] * np.outer(y, y)
+P += Q
+```
+
+这引入了 NumPy 的另一个特性。状态变量 `x` 是一维的，`sigmas[k]` 也是，所以差 `sigmas[k]-X` 也是一维的。NumPy 不会计算一维数组的转置；它认为 `[1,2,3]` 的转置是 `[1,2,3]`。所以我们调用函数 `np.outer(y,y)`，它计算一维数组 $\mathbf{y}$ 的 $\mathbf{yy}^\mathsf{T}$ 的值。另一种实现可以是：
+
+```python
+y = (sigmas[k] - x).reshape(kmax, 1) # convert into 2D array
+P += Wc[K] * np.dot(y, y.T)
+```
+
+这段代码更慢，也不符合惯用写法，所以我们不使用它。
+=====CELL 113=====
+### 预测步骤
+
+对于预测步骤，我们将按上面指定的方式生成权重和 sigma 点。我们让每个 sigma 点通过函数 f。
+
+$$\boldsymbol{\mathcal{Y}} = f(\boldsymbol{\chi})$$
+
+然后我们用无迹变换计算预测的均值和协方差。在下面的代码中，你可以看到我假设这是一个类的方法，该类存储滤波器所需的各种矩阵和向量。
+
+```python
+def predict(self, sigma_points_fn):
+    """ Performs the predict step of the UKF. On return,
+    self.xp and self.Pp contain the predicted state (xp)
+    and covariance (Pp). 'p' stands for prediction.
+    """
+
+    # calculate sigma points for given mean and covariance
+    sigmas = sigma_points_fn(self.x, self.Pp)
+
+    for i in range(self._num_sigmas):
+        self.sigmas_f[i] = self.fx(sigmas[i], self._dt)
+
+    self.xp, self.Pp = unscented_transform(
+                       self.sigmas_f, self.Wm, self.Wc, self.Q)
+```
+=====CELL 114=====
+### 更新步骤
+=====CELL 115=====
+更新步骤通过函数 `h(x)` 把 sigma 点转换到测量空间。
+
+$$\mathcal{Z} = h(\mathcal{Y})$$
+
+这些点的均值和协方差用无迹变换计算。然后计算残差和卡尔曼增益。互方差计算为：
+
+$$\mathbf P_{xz} =\sum_{i=0}^{2n} w^c_i(\boldsymbol{\mathcal Y}_i-\mu)(\boldsymbol{\mathcal Z}_i-\mu_z)^\mathsf T$$
+
+最后，我们用残差和卡尔曼增益计算新的状态估计：
+
+$$\begin{aligned}
+K &= \mathbf P_{xz} \mathbf P_z^{-1}\\
+{\mathbf x} &= \mathbf{\bar x} + \mathbf{Ky}
+\end{aligned}$$
+
+新的协方差计算为：
+
+$$ \mathbf P = \mathbf{\bar P} - \mathbf{KP}_z\mathbf{K}^\mathsf{T}$$
+
+这个函数可以这样实现，假设它是存储所需矩阵和数据的类的方法。
+
+```python
+def update(self, z):
+    # rename for readability
+    sigmas_f = self.sigmas_f
+    sigmas_h = self.sigmas_h
+
+    # transform sigma points into measurement space
+    for i in range(self._num_sigmas):
+        sigmas_h[i] = self.hx(sigmas_f[i])
+
+    # mean and covariance of prediction passed through UT
+    zp, Pz = unscented_transform(sigmas_h, self.Wm, self.Wc, self.R)
+
+    # compute cross variance of the state and the measurements
+    Pxz = np.zeros((self._dim_x, self._dim_z))
+    for i in range(self._num_sigmas):
+        Pxz += self.Wc[i] * np.outer(sigmas_f[i] - self.xp,
+                                    sigmas_h[i] - zp)
+
+    K = np.dot(Pxz, inv(Pz)) # Kalman gain
+
+    self.x = self.xp + np.dot(K, z - zp)
+    self.P = self.Pp - np.dot(K, Pz).dot(K.T)
+```
+=====CELL 116=====
+### FilterPy 的实现
+
+FilterPy 对代码做了一定程度的推广。你可以指定不同的 sigma 点算法，指定如何计算状态变量的残差（你不能对角度做减法，因为它们是模的），提供矩阵平方根函数，等等。详情请参阅帮助。
+
+https://filterpy.readthedocs.org/#unscented-kalman-filter
+=====CELL 117=====
+## 批处理
+
+卡尔曼滤波器是递归的——估计基于当前测量值和先前的估计。但非常常见的是，我们有一组已经收集好的数据要滤波。在这种情况下，滤波器可以以*批*模式运行，即一次对所有测量值进行滤波。
+
+把你的测量值收集到数组或列表中。
+
+```python
+zs = read_altitude_from_csv()
+```
+
+然后调用 `batch_filter()` 方法。
+
+```python
+Xs, Ps = ukf.batch_filter(zs)
+```
+
+该函数接受测量值的列表/数组，对其进行滤波，并返回整个数据集的状态估计数组 (`Xs`) 和协方差矩阵数组 (`Ps`)。
+
+下面是取自上面雷达跟踪问题的一个完整例子。
+=====CELL 119=====
+## 平滑结果
+
+假设我们在跟踪一辆汽车。假设我们得到一个带噪声的测量值，暗示汽车开始向左转弯，但状态函数预测汽车在直行。卡尔曼滤波器别无选择，只能把状态估计朝有噪声的测量值移动一些，因为它无法判断这只是一个特别有噪声的测量值，还是转弯的真正开始。
+
+如果我们在收集数据并进行后处理，那么在这个可疑的测量值之后我们还有测量值，能告诉我们是否转了弯。假设随后的测量值都继续向左转。那么我们就可以确定，这个测量值并不是噪声很大，而是转弯已经开始。
+
+我们不在这里发展数学或算法，我只是向你展示如何在 `FilterPy` 中调用该算法。我们实现的算法称为 *RTS 平滑器*，以该算法的三位发明者命名：Rauch、Tung 和 Striebel。
+
+这个例程是 `UnscentedKalmanFilter.rts_smoother()`。使用它很简单；我们传入 `batch_filter` 步骤计算出的均值和协方差，然后接收平滑后的均值、协方差和卡尔曼增益。
+=====CELL 121=====
+从这些图表中我们可以看到，位置的改善很小，但速度的改善很好，而高度的改善则是惊人的。位置的差异非常小，所以我打印了最后 5 个点上 UKF 与平滑结果之间的差。如果你能对数据进行后处理，我建议总是使用 RTS 平滑器。
+=====CELL 122=====
+## 选择 Sigma 参数
+
+我发现关于选择 $\alpha$、$\beta$ 和 $\kappa$ 的值的文献相当欠缺。Van der Merwe 的论文包含最多的信息，但并不详尽。所以让我们来探究它们的作用。
+
+Van der Merwe 建议对高斯问题使用 $\beta=2$，以及 $\kappa=3-n$。所以让我们从那里开始，改变 $\alpha$。我会令 $n=1$，以最小化我们需要查看的数组的大小，并避免计算矩阵的平方根。
+=====CELL 124=====
+那么这里发生了什么？我们可以看到，对于均值 0，算法选择的 sigma 点是 0、3 和 -3，但为什么？回想计算 sigma 点的方程：
+
+$$\begin{aligned}
+\mathcal{X}_0 &= \mu\\
+\mathcal{X}_i &= \mu \pm \sqrt{(n+\lambda)\Sigma}
+\end{aligned}$$
+
+我选择 $n=1$ 使一切简化为标量，让我们能避免计算矩阵的平方根。所以，对于我们的值，方程是
+
+$$\begin{aligned}
+\mathcal{X}_0 &= 0 \\
+\mathcal{X}_i &= 0 \pm \sqrt{(1+2)\times 3} \\
+&= \pm 3
+\end{aligned}$$
+
+所以随着 $\alpha$ 变大，sigma 点分布得更开。让我们把它设成一个荒谬的值。
+=====CELL 126=====
+我们可以看到 sigma 点分布在 100 个标准差的范围内。如果我们的数据是高斯的，我们就会纳入远离均值许多个标准差的数据；对于非线性问题，这不太可能产生好的结果。但假设我们的分布不是高斯的，而是有非常肥的尾部呢？我们可能需要从那些尾部采样才能得到好的估计，因此把 $\kappa$ 取得更大是有道理的（不是 200，那是为了使 sigma 点的变化鲜明而取的荒谬大值）。
+
+沿着类似的思路，假设我们的分布几乎没有尾部——概率分布看起来更像一个倒置的抛物线。在这种情况下，我们可能想把 sigma 点向均值拉近，以避免在永远不会有真实数据的区域采样。
+
+现在让我们看看权重的变化。当 $k+n=3$ 时，均值的权重是 0.6667，两个外围 sigma 点的权重是 0.1667。另一方面，当 $\alpha=200$ 时，均值权重猛增到 0.99999，外围权重被设为 0.000004。回想权重的方程：
+
+$$\begin{aligned}
+W_0 &= \frac{\lambda}{n+\lambda} \\
+W_i &= \frac{1}{2(n+\lambda)}
+\end{aligned}$$
+
+我们可以看到，随着 $\lambda$ 变大，均值权重的分数 ($\lambda/(n+\lambda)$) 趋近于 1，其余 sigma 点权重的分数趋近于 0。这与你的协方差的大小无关。所以，当我们离均值越来越远地采样时，我们最终给这些样本的权重就越来越小，而如果我们非常靠近均值采样，就会给所有样本非常相似的权重。
+
+然而，Van der Merwe 给出的建议是把 $\alpha$ 限制在范围 $0 \gt \alpha \ge 1$。他建议 $10^{-3}$ 是个好值。让我们试试。
+=====CELL 128=====
+## 机器人定位——一个完整演算的例子
+=====CELL 129=====
+是时候着手处理一个重要的问题了。大多数书籍选择简单的、教科书式的问题，答案也简单，而你只能困惑于如何实现真实世界的问题。这个例子不会教你如何处理任何问题，但说明了在设计和实现滤波器时你必须考虑的那类事情。
+
+我们将考虑机器人定位的问题。在这个场景中，我们有一个机器人在地形中移动，并使用传感器检测地标。这可能是一辆使用计算机视觉识别树木、建筑物和其他地标的自动驾驶汽车。它也可能是给你家吸尘的那种小机器人，或者是仓库里的机器人。
+
+机器人有 4 个轮子，配置与汽车所用的相同。它通过转动前轮来机动。这会使机器人在向前移动时绕后轴旋转。这是非线性行为，我们必须对其建模。
+
+机器人有一个传感器，给出到地形中已知目标的近似距离和方位。这是非线性的，因为由距离和方位计算位置需要平方根和三角学。
+
+过程模型和测量模型都是非线性的。UKF 能够同时适应两者，所以我们初步得出结论：UKF 是解决这个问题的可行选择。
+=====CELL 130=====
+### 机器人运动模型
+=====CELL 131=====
+作为第一近似，汽车通过在向前移动时转动前轮来转向。车头沿车轮所指的方向移动，同时绕后轮旋转。这种简单的描述会因为一些问题而变得复杂，比如摩擦引起的打滑、橡胶轮胎在不同速度下的不同表现，以及外侧轮胎需要走与内侧轮胎不同半径的路径。要精确地对转向建模，需要一组复杂的微分方程。
+
+对于卡尔曼滤波，尤其是对于较低速度的机器人应用，人们发现更简单的*自行车模型*表现良好。这是该模型的示意图：
+=====CELL 133=====
+这里我们看到前轮指向相对于轴距的方向 $\alpha$。在很短的时间内，汽车向前移动，后轮最终位于更靠前的位置，并略微向内转，如蓝色阴影轮胎所示。在这么短的时间内，我们可以把它近似为绕半径 $R$ 的转弯。我们可以计算转弯角 $\beta$
+
+$$\beta = \frac{d}{w} \tan{(\alpha)}$$
+
+转弯半径 R 为
+
+$$R = \frac{d}{\beta}$$
+
+其中给定前进速度 $v$，后轮行进的距离是 $d=v\Delta t$。
+
+以 $\theta$ 表示机器人的朝向，我们把转弯开始前的位置 $C$ 计算为
+
+$$\begin{aligned}
+C_x &= x - R\sin(\theta) \\
+C_y &= y + R\cos(\theta)
+\end{aligned}$$
+
+向前移动时间 $\Delta t$ 之后，机器人的新位置和朝向是
+
+$$\begin{aligned} \bar x &= C_x + R\sin(\theta + \beta) \\
+\bar y &= C_y - R\cos(\theta + \beta) \\
+\bar \theta &= \theta + \beta
+\end{aligned}
+$$
+
+一旦我们代入 $C$，就得到
+
+$$\begin{aligned} \bar x &= x - R\sin(\theta) + R\sin(\theta + \beta) \\
+\bar y &= y + R\cos(\theta) - R\cos(\theta + \beta) \\
+\bar \theta &= \theta + \beta
+\end{aligned}
+$$
+
+如果你对转向模型不感兴趣，就不需要详细理解这个数学。需要认识到的重要一点是，我们的运动模型是非线性的，我们需要用卡尔曼滤波器来处理它。
+=====CELL 134=====
+### 设计状态变量
+
+对于我们的机器人，我们将维护位置和朝向：
+
+$$\mathbf x = \begin{bmatrix}x & y & \theta\end{bmatrix}^\mathsf{T}$$
+
+我可以把速度也纳入这个模型，但正如你将看到的，数学已经相当具有挑战性了。
+
+控制输入 $\mathbf{u}$ 是指令速度和转向角
+
+$$\mathbf{u} = \begin{bmatrix}v & \alpha\end{bmatrix}^\mathsf{T}$$
+=====CELL 135=====
+### 设计系统模型
+
+我们把系统建模为非线性运动模型加白噪声。
+
+$$\bar x = x + f(x, u) + \mathcal{N}(0, Q)$$
+
+使用我们上面为机器人创建的运动模型，我们可以写出：
+=====CELL 137=====
+我们将用这个函数来实现状态转移函数 `f(x)`。
+=====CELL 138=====
+我将把 UKF 设计成使 $\Delta t$ 很小。如果机器人移动缓慢，那么这个函数应该给出相当准确的预测。如果 $\Delta t$ 很大，或者你系统的动力学非常非线性，这种方法就会失败。在这些情况下，你需要用更复杂的数值积分技术来实现，比如 Runge Kutta。数值积分在**卡尔曼滤波器数学**一章中有简要介绍。
+=====CELL 139=====
+### 设计测量模型
+
+传感器提供到地形中多个已知位置的带噪声的方位和距离。测量模型必须把状态 $\begin{bmatrix}x & y&\theta\end{bmatrix}^\mathsf{T}$ 转换成到地标的距离和方位。如果 $p$ 是某个地标的位置，距离 $r$ 是
+
+$$r = \sqrt{(p_x - x)^2 + (p_y - y)^2}$$
+
+我们假设传感器提供相对于机器人朝向的方位，所以我们必须从方位中减去机器人的朝向，才能得到传感器读数，像这样：
+
+$$\phi = \tan^{-1}(\frac{p_y - y}{p_x - x}) - \theta$$
+
+因此我们的测量函数是
+
+$$\begin{aligned}
+\mathbf{z}& = h(\mathbf x, \mathbf P) &+ \mathcal{N}(0, R)\\
+&= \begin{bmatrix}
+\sqrt{(p_x - x)^2 + (p_y - y)^2} \\
+\tan^{-1}(\frac{p_y - y}{p_x - x}) - \theta
+\end{bmatrix} &+ \mathcal{N}(0, R)
+\end{aligned}$$
+
+我现在不实现它，因为有一个困难，将在下面的*实现*一节中讨论。
+=====CELL 140=====
+### 设计测量噪声
+
+假设距离和方位的测量噪声是独立的是合理的，因此
+
+$$\mathbf R=\begin{bmatrix}\sigma_{range}^2 & 0 \\ 0 & \sigma_{bearing}^2\end{bmatrix}$$
+=====CELL 141=====
+### 实现
+=====CELL 142=====
+在开始编码之前，我们还有另一个问题要处理。残差是 $y = z - h(x)$。假设 z 的方位是 $1^\circ$，而 $h(x)$ 是 $359^\circ$。把它们相减得到 $-358^\circ$。这会破坏卡尔曼增益的计算，因为正确的角度差是 $2^\circ$。所以我们必须编写代码来正确地计算方位残差。
+=====CELL 145=====
+状态向量的方位在索引 2 处，但测量向量的方位在索引 1 处，所以我们需要编写函数来分别处理它们。我们面临的另一个问题是，随着机器人的机动，不同的地标会变得可见，所以我们需要处理数量可变的测量值。测量残差的函数将被传入一个包含若干测量值的数组，每个地标一个。
+=====CELL 147=====
+我们现在可以实现测量模型了。方程是
+$$h(\mathbf x, \mathbf P)
+= \begin{bmatrix}
+\sqrt{(p_x - x)^2 + (p_y - y)^2} \\
+\tan^{-1}(\frac{p_y - y}{p_x - x}) - \theta
+\end{bmatrix}$$
+
+表达式 $\tan^{-1}(\frac{p_y - y}{p_x - x}) - \theta$ 可能产生落在范围 $[-\pi, \pi)$ 之外的结果，所以我们应该把角度归一化到该范围。
+
+该函数将被传入一个地标数组，需要产生形如 `[dist_to_1, bearing_to_1, dist_to_2, bearing_to_2, ...]` 的测量值数组。
+=====CELL 149=====
+我们的困难还没有结束。无迹变换计算状态向量和测量向量的平均值，但每个向量都包含一个方位。计算一组角度的平均值没有唯一的方法。例如，359$^\circ$ 和 3$^\circ$ 的平均值是多少？直觉认为答案应该是 1$^\circ$，但朴素的 $\frac{1}{n}\sum x$ 方法会得到 181$^\circ$。
+
+一种常见的方法是取正弦和余弦之和的反正切。
+
+$$\bar{\theta} = atan2\left(\frac{\sum_{i=1}^n \sin\theta_i}{n}, \frac{\sum_{i=1}^n \cos\theta_i}{n}\right)$$
+
+`UnscentedKalmanFilter.__init__()` 有一个参数 `x_mean_fn`，用于计算状态均值的函数，以及 `z_mean_fn`，用于计算测量值均值的函数。我们将把这些函数编写为：
+=====CELL 151=====
+这些函数利用了 NumPy 的三角函数对数组进行运算这一事实，并且 `dot` 执行逐元素乘法。NumPy 是用 C 和 Fortran 实现的，所以 `sum(dot(sin(x), w))` 比用 Python 编写等效的循环快得多。
+
+做完这些，我们现在准备好实现 UKF 了。我想指出，当我设计这个滤波器时，并不是一次性从头把上面所有的函数都设计出来。我把一个带有预定义地标的基本 UKF 拼在一起，验证它能工作，然后才开始填充各个部分。“如果我看到不同的地标怎么办？”这使我把测量函数改成接受地标数组。“我该如何处理角度残差的计算？”这使我编写了角度归一化的代码。“一组角度的*均值*是什么？”我在互联网上搜索，找到了 Wikipedia 上的一篇文章，并实现了那个算法。不要被吓倒。设计你能设计的，然后提出问题并逐个解决。
+
+你已经见过 UKF 的实现了，所以我不会详细描述它。这里有两个新东西。当我们构造 sigma 点和滤波器时，我们必须向它提供我们编写的计算残差和均值的函数。
+
+```python
+points = SigmaPoints(n=3, alpha=.00001, beta=2, kappa=0,
+                     subtract=residual_x)
+
+ukf = UKF(dim_x=3, dim_z=2, fx=fx, hx=Hx, dt=dt, points=points,
+         x_mean_fn=state_mean, z_mean_fn=z_mean,
+         residual_x=residual_x, residual_z=residual_h)
+```
+
+接下来，我们需要把额外的数据传入我们的 `f(x, dt)` 和 `h(x)` 函数。我们想对 `f(x, dt)` 使用 `move(x, dt, u, wheelbase)`，对 `h(x)` 使用 `Hx(x, landmarks)`。我们可以做到这一点，只需像这样把额外的参数作为关键字参数传入 `predict()` 和 `update()`：
+
+```python
+            ukf.predict(u=u, wheelbase=wheelbase)
+            ukf.update(z, landmarks=landmarks)
+```
+
+其余的代码运行模拟并绘制结果。我创建了一个变量 `landmarks`，包含地标的坐标。我每秒更新 10 次模拟的机器人位置，但每秒只运行一次 UKF。我们没有使用 Runge Kutta 对运动微分方程积分，所以较小的时间步使模拟更精确。
+=====CELL 154=====
+其余的代码运行模拟并绘制结果。我创建了一个变量 `landmarks`，包含地标的坐标。我每秒更新 10 次模拟的机器人位置，但只运行一次 UKF。这有两个原因。第一，我们没有使用 Runge Kutta 对运动微分方程积分，所以较窄的时间步能让我们的模拟更精确。第二，在嵌入式系统中处理速度有限是相当正常的。这迫使你只在绝对需要时才运行卡尔曼滤波器。
+=====CELL 155=====
+### 驾驶机器人
+
+上面运行中的转向模拟并不现实。速度和转向角从未改变，这对卡尔曼滤波器没有构成太大问题。我们可以实现一个复杂的 PID 控制的机器人模拟，但我只是用 NumPy 的 `linspace` 方法生成变化的转向指令。我还会添加更多地标，因为机器人将比第一个例子中走得远得多。
+=====CELL 158=====
+不确定性很快就变得非常小。协方差椭圆显示的是 $6\sigma$ 协方差，但椭圆小得难以看清。我们可以只在起点附近提供两个地标，以在答案中纳入更多的误差。当我们运行这个滤波器时，随着机器人离这些地标越来越远，误差会增加。
+=====CELL 160=====
+## 讨论
+
+你对本章的印象大概取决于你过去实现过多少非线性卡尔曼滤波器。如果这是你第一次接触，也许 $2n+1$ 个 sigma 点的计算以及随后 $f(x)$ 和 $h(x)$ 函数的编写让你觉得有点繁琐。的确，由于需要处理角度的模运算，我花在让一切工作起来上的时间比我愿意承认的要多。另一方面，如果你实现过扩展卡尔曼滤波器 (EKF)，也许你正在座位上欢呼雀跃。为 UKF 编写函数有一点乏味，但概念非常基础。同一问题的 EKF 需要一些相当困难的数学。对于许多问题，我们无法找到 EKF 方程的封闭形式的解，必须退而求助于某种迭代解。
+
+UKF 相对于 EKF 的优势不仅在于实现相对容易。现在讨论这个还为时过早，因为你还没有学过 EKF，但 EKF 在一个点上对问题线性化，并让该点通过线性卡尔曼滤波器。相比之下，UKF 取 $2n+1$ 个样本。因此 UKF 通常比 EKF 更准确，尤其是在问题高度非线性的时候。虽然并不能保证 UKF 总是优于 EKF，但在实践中已经证明它至少和 EKF 一样好，而且通常好得多。
+
+因此我的建议是始终从实现 UKF 开始。如果你的滤波器一旦发散就会造成现实后果（人员死亡、巨额金钱损失、发电厂爆炸），你当然必须进行复杂的分析和实验来选择最佳的滤波器。这超出了本书的范围，你应该去读研究生来学习这门理论。
+
+最后，我把 UKF 说成是进行 sigma 点滤波的*那种*方法。这并不正确。我选择的具体版本是 Julier 的缩放无迹滤波器，由 Van der Merwe 在他 2004 年的论文中参数化。如果你搜索 Julier、Van der Merwe、Uhlmann 和 Wan，你会发现他们开发的一族类似的 sigma 点滤波器。每种技术使用不同的方式来选择和加权 sigma 点。但选择并不止于此。例如，SVD 卡尔曼滤波器使用奇异值分解 (SVD) 来求概率分布的近似均值和协方差。请把本章看作对 sigma 点滤波器的介绍，而不是对它们如何工作的权威论述。
+=====CELL 161=====
+## 参考文献
+=====CELL 162=====
+- [1] Rudolph Van der Merwe. "Sigma-Point Kalman Filters for Probabilistic Inference in Dynamic State-Space Models" dissertation (2004).
+
+- [2] Simon J. Julier. "The Scaled Unscented Transformation". Proceedings of the American Control Conference 6. IEEE. (2002)
+
+- [3] http://www.esdradar.com/brochures/Compact%20Tracking%2037250X.pdf
+
+- [4] Julier, Simon J.; Uhlmann, Jeffrey "A New Extension of the Kalman  Filter to Nonlinear Systems". Proc. SPIE 3068, Signal Processing, Sensor Fusion, and Target Recognition VI, 182 (July 28, 1997)
+
+- [5] Cholesky decomposition. Wikipedia. http://en.wikipedia.org/wiki/Cholesky_decomposition

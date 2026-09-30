@@ -1,0 +1,114 @@
+=====CELL 1=====
+# Converting the Multivariate Equations to the Univariate Case
+
+The multivariate Kalman filter equations do not resemble the equations for the univariate filter. However, if we use one dimensional states and measurements the equations do reduce to the univariate equations. This section will provide you with a strong intuition into what the Kalman filter equations are actually doing. While reading this section is not required to understand the rest of the book, I recommend reading this section carefully as it should make the rest of the material easier to understand.
+
+Here are the multivariate equations for the prediction. 
+
+$$
+\begin{aligned}
+\mathbf{\bar{x}} &= \mathbf{F x} + \mathbf{B u} \\
+\mathbf{\bar{P}} &= \mathbf{FPF}^\mathsf{T} + \mathbf Q
+\end{aligned}
+$$
+
+For a univariate problem the state $\mathbf x$ only has one variable, so it is a $1\times 1$ matrix. Our motion $\mathbf{u}$ is also a $1\times 1$ matrix. Therefore, $\mathbf{F}$ and $\mathbf B$ must also be $1\times 1$ matrices. That means that they are all scalars, and we can write
+
+$$\bar{x} = Fx + Bu$$
+
+Here the variables are not bold, denoting that they are not matrices or vectors. 
+
+Our state transition is simple - the next state is the same as this state, so $F=1$. The same holds for the motion transition, so, $B=1$. Thus we have
+
+$$x = x + u$$
+
+which is equivalent to the Gaussian equation from the last chapter
+
+$$ \mu = \mu_1+\mu_2$$
+
+Hopefully the general process is clear, so now I will go a bit faster on the rest. We have
+
+$$\mathbf{\bar{P}} = \mathbf{FPF}^\mathsf{T} + \mathbf Q$$
+
+Again, since our state only has one variable $\mathbf P$ and $\mathbf Q$ must also be $1\times 1$ matrix, which we can treat as scalars, yielding  
+
+$$\bar{P} = FPF^\mathsf{T} + Q$$
+
+We already know $F=1$. The transpose of a scalar is the scalar, so $F^\mathsf{T} = 1$. This yields
+
+$$\bar{P} = P + Q$$
+
+which is equivalent to the Gaussian equation of 
+
+$$\sigma^2 = \sigma_1^2 + \sigma_2^2$$
+
+This proves that the multivariate prediction equations are performing the same math as the univariate equations for the case of the dimension being 1.
+
+These are the equations for the update step:
+
+$$
+\begin{aligned}
+\mathbf{K}&= \mathbf{\bar{P}H}^\mathsf{T} (\mathbf{H\bar{P}H}^\mathsf{T} + \mathbf R)^{-1} \\
+\textbf{y} &= \mathbf z - \mathbf{H \bar{x}}\\
+\mathbf x&=\mathbf{\bar{x}} +\mathbf{K\textbf{y}} \\
+\mathbf P&= (\mathbf{I}-\mathbf{KH})\mathbf{\bar{P}}
+\end{aligned}
+$$
+
+As above, all of the matrices become scalars. $H$ defines how we convert from a position to a measurement. Both are positions, so there is no conversion, and thus $H=1$. Let's substitute in our known values and convert to scalar in one step. The inverse of a 1x1 matrix is the reciprocal of the value so we will convert the matrix inversion to division.
+
+$$
+\begin{aligned}
+K &=\frac{\bar{P}}{\bar{P} + R} \\
+y &= z - \bar{x}\\
+x &=\bar{x}+Ky \\
+P &= (1-K)\bar{P}
+\end{aligned}
+$$
+
+Before we continue with the proof, I want you to look at those equations to recognize what a simple concept these equations implement. The residual $y$ is nothing more than the measurement minus the prediction. The gain $K$ is scaled based on how certain we are about the last prediction vs how certain we are about the measurement. We choose a new state $x$ based on the old value of $x$ plus the scaled value of the residual. Finally, we update the uncertainty based on how certain we are about the measurement. Algorithmically this should sound exactly like what we did in the last chapter.
+
+Let's finish off the algebra to prove this. Recall that the univariate equations for the update step are:
+
+$$
+\begin{aligned}
+\mu &=\frac{\sigma_1^2 \mu_2 + \sigma_2^2 \mu_1} {\sigma_1^2 + \sigma_2^2}, \\
+\sigma^2 &= \frac{1}{\frac{1}{\sigma_1^2} + \frac{1}{\sigma_2^2}}
+\end{aligned}
+$$
+
+Here we will say that $\mu_1$ is the state $x$, and $\mu_2$ is the measurement $z$. Thus it follows that that $\sigma_1^2$ is the state uncertainty $P$, and $\sigma_2^2$ is the measurement noise $R$. Let's substitute those in.
+
+$$\begin{aligned} \mu &= \frac{Pz + Rx}{P+R} \\
+\sigma^2 &= \frac{1}{\frac{1}{P} + \frac{1}{R}}
+\end{aligned}$$
+
+I will handle $\mu$ first. The corresponding equation in the multivariate case is
+
+$$
+\begin{aligned}
+x &= x + Ky \\
+&= x + \frac{P}{P+R}(z-x) \\
+&= \frac{P+R}{P+R}x + \frac{Pz - Px}{P+R} \\
+&= \frac{Px + Rx + Pz - Px}{P+R} \\
+&= \frac{Pz + Rx}{P+R}
+\end{aligned}
+$$
+
+Now let's look at $\sigma^2$. The corresponding equation in the multivariate case is
+
+$$ 
+\begin{aligned}
+P &= (1-K)P \\
+&= (1-\frac{P}{P+R})P \\
+&= (\frac{P+R}{P+R}-\frac{P}{P+R})P \\
+&= (\frac{P+R-P}{P+R})P \\
+&= \frac{RP}{P+R}\\
+&= \frac{1}{\frac{P+R}{RP}}\\
+&= \frac{1}{\frac{R}{RP} + \frac{P}{RP}} \\
+&= \frac{1}{\frac{1}{P} + \frac{1}{R}}
+\quad\blacksquare
+\end{aligned}
+$$
+
+We have proven that the multivariate equations are equivalent to the univariate equations when we only have one state variable. I'll close this section by recognizing one quibble - I hand waved my assertion that $H=1$ and $F=1$. In general we know this is not true. For example, a digital thermometer may provide measurement in volts, and we need to convert that to temperature, and we use $H$ to do that conversion. I left that issue out to keep the explanation as simple and streamlined as possible. It is very straightforward to add that generalization to the equations above, redo the algebra, and still have the same results.\\\

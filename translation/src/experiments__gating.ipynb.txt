@@ -1,0 +1,20 @@
+=====CELL 0=====
+** code and text not yet correct - ignore!!! **
+
+## Erroneous Measurements
+
+If you can trust your sensor to never malfunction or provide a spurious measurement you are lucky. Skip to the next section. The reality is that sensors are imperfect. Stray voltages affect signals, birds fly in front of distance sensors. Computer vision sensors mistake shadows for pedestrians. And so on. 
+
+Entire books are devoted to this topic. I've found that books which address multi-target tracking with radar to be particularly useful. I'll just address a couple of points that will greatly improve your filters with only a tiny amount of theory and code. 
+
+We've discussed the *likelihood* function. Recall Bayes rule:
+
+$$\text{posterior} = \frac{\text{likelihood}\times\text{prior}}{\text{evidence}}$$
+
+where the likelihood is defined as
+
+$$\mathcal L = p(\mathbf z \mid \mathbf x)$$
+
+That is simply the likelihood (probability) of the measurements given the prior $\mathbf x$. This suggests a trivial *gating* function. Here *gating* means a function that accepts or rejects the measurement based on some criteria. We assume that the measurement noise is Gaussian. Recall from the Gaussians chapter that 99.7% of all values fall within 3 standard deviations of the mean. If the measurement  $\mathbf z > 3 \sigma$ we can discard it as being very unlikely. Easy.
+
+In practice you probably shouldn't do that. We *model* the sensors as being Gaussian, but in practice they probably aren't. The tails might be thick, it might be a slightly different distribution such as Students t-distribution, and so on. For example, NASA uses between  $5\sigma$ and $6\sigma$ to accommodate the true behavior of the sensors on the Orion mission. Chances are your budget is less than NASA's, but I suspect the stakes are commensurately less. There is no way to analytically determine the correct value. You will need to run experiments with your data to see what value is reasonable for your application.

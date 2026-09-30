@@ -1,0 +1,117 @@
+=====CELL 0=====
+[目录](./table_of_contents.ipynb)
+=====CELL 2=====
+# 安装
+=====CELL 3=====
+本书是用 Jupyter Notebook 写成的，这是一个基于浏览器的交互式 Python 环境，可以把 Python、文字和数学混合在一起。我选择它是因为它的交互特性——在开始使用交互式环境之前，我觉得卡尔曼滤波几乎不可能学会。除非你能修改许多参数并立即看到输出，否则很难对它们形成直觉。交互式环境还允许你尝试“如果……会怎样”的场景。“如果我把 $\mathbf{Q}$ 设为零会怎样？”用 Jupyter Notebook 很容易找到答案。
+
+我选择它的另一个原因是，大多数教科书会让许多事情变得不透明。例如，伪代码旁边可能有一张漂亮的图。这张图是由软件生成的，但读者却得不到这个软件。我希望制作本书所用的一切都能提供给你。如何绘制协方差椭圆？读大多数书你都不会知道。而使用 Jupyter Notebook，你只需要看一下源代码。
+
+即使你选择在线阅读本书，你也需要安装 Python 和 SciPy 技术栈，以便编写自己的卡尔曼滤波器。安装这些库有许多不同的方式，我无法一一涵盖，但我会介绍几种典型场景。
+=====CELL 4=====
+## 安装 SciPy 技术栈
+=====CELL 5=====
+本书需要 IPython、Jupyter、NumPy、SciPy、SymPy 和 Matplotlib。由 NumPy、SciPy 和 Matplotlib 组成的 SciPy 技术栈依赖第三方的 Fortran 和 C 代码，从源代码安装并不容易。SciPy 网站强烈建议使用预构建的安装包，我也赞同这一建议。
+
+Jupyter notebook 是允许你在浏览器中运行 Python 的软件——本书就是一组 Jupyter notebook。IPython 为 Jupyter 和数据可视化提供基础设施。NumPy 和 SciPy 是提供线性代数实现的包，滤波器会用到它们。SymPy 执行符号数学运算——我用它来求代数方程的导数。最后，Matplotlib 提供绘图能力。
+
+我使用 Continuum Analytics 的 Anaconda 发行版。这是一个出色的发行版，把上面列出的所有包以及许多其他包合在了一起。IPython 也推荐用这个包来安装 IPython。安装非常简单，并且可以与你机器上已有的其他 Python 安装并存。它可以免费使用。你可以从这里下载：http://continuum.io/downloads 我强烈建议使用他们提供的最新 Python 3 版本，不过本书和 FilterPy 兼容 Python 3.6 或更高版本。
+
+安装 SciPy 技术栈还有其他选择。你可以在这里找到说明：http://scipy.org/install.html 这可能非常繁琐，我不提供支持，也不提供任何有关如何操作的说明。
+
+许多 Linux 发行版预装了这些包。然而，它们往往有些过时，需要更新，因为本书依赖所有这些包的较新版本。如何更新某个特定的 Linux 安装超出了本书的范围。Anaconda 发行版的一个优点是它不会修改你本地的 Python 安装，所以你可以安装它而不会破坏你的 linux 发行版。有些人在这里栽了跟头：他们安装了 Anaconda，但默认使用的仍是原来的 Python 版本，结果本书的软件无法正确运行。
+
+我不会在这些库的旧版本上运行回归测试。事实上，我知道代码无法在旧版本（比如 2014-2015 年的版本）上运行。我不想把一生都花在为一本书做技术支持上，因此我把安装较新版本的 Python 和 SciPy 技术栈的责任交给了你。
+
+
+你需要安装 Python 3.6 或更高版本。
+
+如果你安装了最新的 Anaconda 却出现问题，请在本书的 [github 仓库](https://github.com/rlabbe/Kalman-and-Bayesian-Filters-in-Python)提交 bug 报告——我会继续确保本书能在最新的 Anaconda 版本上运行。至于本书在旧版安装上能否运行，我相当无所谓。抱歉，但我实在没有时间为每个人不同的环境提供支持。像 `jupyter notebook` 这样的包正在快速演进，我既要跟上所有的变化，*又要*保持向后兼容，是做不到的。
+
+如果你在其他项目中需要旧版本的软件，请注意 Anaconda 允许你并存安装多个版本。相关文档在这里：
+
+https://conda.io/docs/user-guide/tasks/manage-python.html
+
+=====CELL 6=====
+## 安装 FilterPy
+
+FilterPy 是一个 Python 库，实现了本书中用到的所有滤波器，以及相当多其他滤波器。使用 `pip` 安装很容易。在命令提示符下执行以下命令：
+
+     pip install filterpy
+     
+     
+FilterPy 是我写的，最新的开发版本始终可以在 https://github.com/rlabbe/filterpy 获取。
+=====CELL 7=====
+## 下载并运行本书
+=====CELL 8=====
+本书存放在一个 github 仓库中。在命令行中输入以下命令：
+
+    git clone --depth=1 https://github.com/rlabbe/Kalman-and-Bayesian-Filters-in-Python.git
+
+这会创建一个名为 Kalman-and-Bayesian-Filters-in-Python 的目录。`depth` 参数只会获取最新版本。除非你需要查看我完整的提交历史，否则这样会快得多，也节省空间。
+
+如果你没有安装 git，可以在浏览器中访问 https://github.com/rlabbe/Kalman-and-Bayesian-Filters-in-Python 下载本书。
+
+现在，在命令提示符下切换到刚刚创建的目录，然后运行 Jupyter notebook：
+
+    cd Kalman-and-Bayesian-Filters-in-Python
+    jupyter notebook
+
+应该会弹出一个浏览器窗口，显示本书的所有章节。点击第一章进入，然后点击链接打开该子目录中的 notebook。
+
+有关运行 notebook 的更多信息可以在这里找到：
+
+http://jupyter-notebook-beginner-guide.readthedocs.org/en/latest/execute.html
+=====CELL 9=====
+## 配套软件
+=====CELL 10=====
+专用于本书的代码与本书一起存放在子目录 *./kf_book* 中。这些代码处于变动之中，我暂时不想在这里为它们编写文档。书中用到该目录下的代码时我会说明，所以它不应该是个谜。
+
+在 *kf_book* 子目录中，有一些名字形如 *xxx*_internal.py 的 Python 文件。我用它们来存放对某一章特别有用的函数。这样我就可以把不太值得阅读的 Python 代码藏起来——我可能是在生成一幅图或图表，而我希望你关注图表的内容，而不是我用 Python 生成该图表的具体机制。如果你对这些机制感到好奇，去浏览源代码就行了。
+
+有些章节会引入对全书其余部分都有用的函数。这些函数最初在 Notebook 内部定义，但代码也会存放在一个 Python 文件中，在后面的章节需要时导入。我会在函数首次定义的地方说明这一点，不过这仍在完善之中。我尽量避免这样做，因为那样我就总要面对目录中的代码与书中代码不同步的问题。然而，IPython Notebook 没有提供引用其他 notebook 中代码单元格的方法，所以这是我所知道的在 notebook 之间共享功能的唯一机制。
+
+有一个没有文档的目录，名为 **experiments**。这是我在把代码放进书中之前编写和测试代码的地方。里面有一些有趣的东西，欢迎随意查看。随着本书的演进，我计划创建一些示例和项目，其中很多材料最终会放到那里。小实验最终会被直接删除。如果你只是想读这本书，可以放心地忽略这个目录。
+
+子目录 *./kf_book* 包含一个 css 文件，其中是本书的样式指南。IPython Notebook 默认的外观相当朴素。这方面的工作正在进行中。我参照了诸如 [Probabilistic Programming and Bayesian Methods for Hackers](http://nbviewer.ipython.org/github/CamDavidsonPilon/Probabilistic-Programming-and-Bayesian-Methods-for-Hackers/blob/master/Chapter1_Introduction/Chapter1.ipynb) 这类书所树立的范例。Lorena Barba 教授出色的工作也给了我很大影响，[见这里](https://github.com/barbagroup/CFDPython)。我的全部外观和风格都归功于这些项目的工作。
+
+=====CELL 11=====
+## 使用 Jupyter Notebook
+=====CELL 12=====
+关于 Jupyter Notebook 的完整教程超出了本书的范围，网上有很多。简而言之，Python 代码放在单元格中。这些单元格以类似 `In [1]:` 的文字开头，代码本身位于一个带框的区域内。如果在焦点位于框内时按下 CTRL-ENTER，代码就会运行，结果显示在框的下方。就像这样：
+=====CELL 14=====
+如果你现在是在 Jupyter Notebook 中打开本页，请尝试修改这段代码：改变 print 语句中的表达式，然后按 CTRL+ENTER。输出应该会随之改变，以反映你在代码单元格中输入的内容。
+=====CELL 15=====
+## SymPy
+=====CELL 16=====
+SymPy 是一个用于执行符号数学运算的 Python 包。它的全部功能超出了本书的范围，但它可以进行代数运算、对方程求积分和求导、求微分方程的解，等等。例如，我们用它来计算矩阵的雅可比矩阵，以及期望值的积分计算。
+
+首先来看一个简单的例子。我们将导入 SymPy，初始化它的美化打印功能（它会用 LaTeX 打印方程）。然后我们将声明一个供 SymPy 使用的符号。
+=====CELL 18=====
+注意它是如何用 LaTeX 打印符号 `phi` 的。现在我们来做一些数学运算。$\sqrt{\phi}$ 的导数是什么？
+=====CELL 20=====
+我们可以对方程进行因式分解
+=====CELL 22=====
+也可以把它们展开。
+=====CELL 24=====
+你可以为方程中的变量代入具体的值来求值：
+=====CELL 26=====
+对于使用了尚未定义的符号的方程，你也可以使用字符串：
+=====CELL 28=====
+现在我们用 SymPy 来计算一个矩阵的雅可比矩阵。给定函数
+
+$$h=\sqrt{(x^2 + z^2)}$$
+
+求它关于 x、y 和 z 的雅可比矩阵。
+=====CELL 30=====
+现在，给定连续过程噪声矩阵，我们来计算离散过程噪声矩阵 $\mathbf Q$
+$$\mathbf Q = \Phi_s \begin{bmatrix}0&0&0\\0&0&0\\0&0&1\end{bmatrix}$$
+
+其积分为
+
+$$\mathbf Q = \int_0^{\Delta t} \mathbf F(t)\mathbf Q\mathbf F^T(t)\, dt$$
+
+其中
+$$\mathbf F(\Delta t) = \begin{bmatrix}1 & \Delta t & {\Delta t}^2/2 \\ 0 & 1 & \Delta t\\ 0& 0& 1\end{bmatrix}$$
+=====CELL 32=====
+## 各种链接

@@ -1,0 +1,14 @@
+=====CELL 0=====
+# Discrete Bayes Animations
+=====CELL 2=====
+This notebook creates the animations for the Discrete Bayesian filters chapter. It is not really intended to be a readable part of the book, but of course you are free to look at the source code, and even modify it. However, if you are interested in running your own animations, I'll point you to the examples subdirectory of the book, which contains a number of python scripts that you can run and modify from an IDE or the command line. This module saves the animations to GIF files, which is quite slow and not very interactive. 
+
+On Windows you need to install ffmpeg with
+
+    $ conda install -c conda-forge ffmpeg
+    
+I don't know what to do for linux or MaxOS.
+=====CELL 6=====
+<img src="02_no_info.gif">
+=====CELL 8=====
+ <img src="02_simulate.gif">

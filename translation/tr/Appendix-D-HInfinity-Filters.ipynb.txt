@@ -1,0 +1,13 @@
+=====CELL 0=====
+[目录](./table_of_contents.ipynb)
+=====CELL 1=====
+# H 无穷滤波器
+=====CELL 4=====
+我仍在斟酌这一章该怎么写。在此期间，克利夫兰州立大学的 Dan Simon 教授在这里给出了一篇通俗易懂的介绍：
+
+http://academic.csuohio.edu/simond/courses/eec641/hinfinity.pdf
+
+用一句话来说，$H_\infty$（H 无穷）滤波器类似于卡尔曼滤波器，但它面对非高斯、不可预测的输入时具有鲁棒性。
+
+
+我的 FilterPy 库中包含一个 H 无穷滤波器。我在下面贴了一些测试代码，实现了 Simon 在上述文章中设计的滤波器。希望对你有帮助。

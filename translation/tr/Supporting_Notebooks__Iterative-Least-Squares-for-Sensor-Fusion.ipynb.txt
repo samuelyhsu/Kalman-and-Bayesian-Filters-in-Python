@@ -1,0 +1,191 @@
+=====CELL 0=====
+# 用于传感器融合的迭代最小二乘
+=====CELL 2=====
+卡尔曼滤波器的一大类用途是*传感器融合*。例如，我们可能有一个位置传感器和一个速度传感器，希望把两者的数据结合起来，得到状态的最优估计。在本节中，我们将讨论另一种情形：有多个传感器提供同一类型的测量值。
+
+ 全球定位系统（GPS）的设计使得在地球上任何一点、任何时刻，至少有 6 颗卫星处于可见范围内。GPS 接收机知道这些卫星在天空中相对于地球的位置。在每个历元（时间上的一个瞬间），接收机会从每颗卫星收到一个信号，并由此推导出到该卫星的*伪距*。更具体地说，GPS 接收机收到的信号标识了卫星，并带有信号发射时刻的时间戳。GPS 卫星上装有原子钟，所以这个时间戳极其精确。信号以光速传播，而光速在真空中是恒定的，所以理论上 GPS 应该能通过测量信号到达接收机花了多长时间，得出极其精确的距离测量值。但这有几个问题。第一，信号并不是在真空中传播，而是穿过大气层。大气会使信号弯曲，所以它并不沿直线传播。这会使信号到达接收机所需的时间比理论值更长。第二，GPS *接收机*上的时钟不太准确，所以推导出精确的时间间隔并非易事。第三，在许多环境中，信号会在建筑物、树木和其他物体上反射，造成路径变长或出现*多径*，此时接收机既收到来自太空的原始信号，也收到反射信号。
+
+让我们用图形来看这个问题。我会在 2D 中做这件事，以便更容易绘图和观察，当然这可以推广到三维。我们知道每颗卫星的位置以及到每颗卫星的距离（这个距离称为*伪距*；稍后我们会讨论原因）。我们无法精确测量距离，所以测量带有噪声，我用线条的粗细来表示。下面是来自四颗卫星的四个伪距读数的例子。我把它们摆成了一种在实际 GPS 星座中不太可能出现的布局，只是为了让交点更容易看清。另外，图中所示的误差大小与距离并不成比例，同样是为了更容易看清。
+=====CELL 4=====
+在 2D 中，有时两个测量值就足以确定唯一解。距离圆有两个交点，但第二个交点在物理上往往无法实现（它在太空中，或者在地下）。然而，对于 GPS，我们还需要求解时间，所以需要第三个测量值才能得到 2D 位置。
+
+然而，由于 GPS 是一个 3D 系统，我们需要求解 3 个空间维度和 1 个时间维度。这是 4 个未知数，所以理论上有 4 颗卫星就拥有了我们需要的全部信息。然而，我们通常至少有 6 颗卫星可见，而且常常多于 6 颗。这意味着该系统是*超定*的。最后，由于测量中存在噪声，没有任何伪距会恰好相交。
+
+如果你精通线性代数，就知道这是科学计算中极其常见的问题，并且有各种技术可以求解超定系统。GPS 接收机用来求位置的最常见方法可能是*迭代最小二乘*算法，通常缩写为 ILS。如你所知，如果误差是高斯的，那么最小二乘算法能找到最优解。换句话说，对于超定系统，我们想要最小化残差的平方。
+
+我们从一些你应该熟悉的定义开始。首先，我们把新息定义为
+
+$$\delta \mathbf{\bar{z}}= \mathbf z - h(\mathbf{\bar{x}})$$
+
+其中 $\mathbf z$ 是测量值，$h(\bullet)$ 是测量函数，$\delta \mathbf{\bar{z}}$ 是新息，在 FilterPy 中我们把它缩写为 $y$。换句话说，这就是线性卡尔曼滤波器更新步骤中的方程 $\mathbf{y} = \mathbf z - \mathbf{H\bar{x}}$。
+
+接下来，*测量残差*是
+
+$$\delta \mathbf z^+ = \mathbf z - h(\mathbf x^+)$$
+
+我不常用上标加号，因为我发现它很快就会让方程变得难以阅读，但 $\mathbf x^+$ 是*后验*状态估计，也就是预测的或未知的未来状态。换句话说，线性卡尔曼滤波器的预测步骤计算的就是这个值。在这里，它代表 ILS 算法在每次迭代中将要计算的 x 的值。
+
+这些方程给出了下面的线性代数方程：
+
+$$\delta \mathbf z^- = \mathbf H\delta \mathbf x + \delta \mathbf z^+$$
+
+$\mathbf H$ 是我们的测量函数，定义为
+
+$$\mathbf H = \frac{d\mathbf H}{d\mathbf x} = \frac{d\mathbf z}{d\mathbf x}$$
+
+我们通过求导并令其为零来找到一个方程的最小值。在这里，我们想最小化残差的平方，所以我们的方程是
+=====CELL 5=====
+$$ \frac{\partial}{\partial \mathbf x}({\delta \mathbf z^+}^\mathsf{T}\delta \mathbf z^+) = 0,$$
+
+其中
+
+$$\delta \mathbf z^+=\delta \mathbf z^- - \mathbf H\delta \mathbf x.$$
+
+这里我改用矩阵 $\mathbf H$ 作为测量函数。我们想用线性代数来执行 ILS，所以每一步我们都必须计算矩阵 $\mathbf H$，它对应于每次迭代中的 $h(\mathbf{x^-})$。对于这类问题，$h(\bullet)$ 通常是非线性的，所以你必须在每一步对它进行线性化（稍后会详细介绍）。
+
+出于各种原因，你可能想让某些测量值的权重大于其他测量值。例如，问题的几何结构可能有利于正交的测量，或者某些测量的噪声可能比其他的更大。我们可以用下面的方程来做到这一点
+
+$$ \frac{\partial}{\partial \mathbf x}({\delta \mathbf z^+}^\mathsf{T}\mathbf{W}\delta \mathbf z^+) = 0$$
+
+如果我们对第一个方程求解 ${\delta \mathbf x}$（推导过程在下一节给出），会得到
+
+$${\delta \mathbf x} = {{(\mathbf H^\mathsf{T}\mathbf H)^{-1}}\mathbf H^\mathsf{T} \delta \mathbf z^-}
+$$
+
+第二个方程则给出
+
+$${\delta \mathbf x} = {{(\mathbf H^\mathsf{T}\mathbf{WH})^{-1}}\mathbf H^\mathsf{T}\mathbf{W} \delta \mathbf z^-}
+$$
+
+由于这些方程是超定的，我们无法精确求解，所以使用迭代方法。先对位置做一个初始猜测，并用这个猜测通过上面的方程计算 $\delta \mathbf x$。把 $\delta \mathbf x$ 加到初始猜测上，再把这个新状态代回方程，产生另一个 $\delta \mathbf x$。我们以这种方式迭代，直到测量残差的差值足够小。
+=====CELL 6=====
+### ILS 方程的推导
+=====CELL 7=====
+我会用代码实现 ILS，但首先让我们推导 $\delta \mathbf x$ 的方程。如果你愿意，可以跳过这个推导，但它有一定的启发性，而且如果你懂基本的线性代数和偏微分方程，也不太难。
+
+把 $\delta \mathbf z^+=\delta \mathbf z^- - \mathbf H\delta \mathbf x$ 代入偏微分方程，我们得到
+
+$$ \frac{\partial}{\partial \mathbf x}(\delta \mathbf z^- -\mathbf H \delta \mathbf x)^\mathsf{T}(\delta \mathbf z^- - \mathbf H \delta \mathbf x)=0$$
+
+展开为
+
+$$ \frac{\partial}{\partial \mathbf x}({\delta \mathbf x}^\mathsf{T}\mathbf H^\mathsf{T}\mathbf H\delta \mathbf x -
+{\delta \mathbf x}^\mathsf{T}\mathbf H^\mathsf{T}\delta \mathbf z^- -
+{\delta \mathbf z^-}^\mathsf{T}\mathbf H\delta \mathbf x +
+{\delta \mathbf z^-}^\mathsf{T}\delta \mathbf z^-)=0$$
+=====CELL 8=====
+我们知道
+
+$$\frac{\partial \mathbf{A}^\mathsf{T}\mathbf B}{\partial \mathbf B} = \frac{\partial \mathbf B^\mathsf{T}\mathbf{A}}{\partial \mathbf B} = \mathbf{A}^\mathsf{T}$$
+
+因此第三项可以计算为
+
+$$\frac{\partial}{\partial \mathbf x}{\delta \mathbf z^-}^\mathsf{T}\mathbf H\delta \mathbf x = {\delta \mathbf z^-}^\mathsf{T}\mathbf H$$
+
+第二项为
+
+$$\frac{\partial}{\partial \mathbf x}{\delta \mathbf x}^\mathsf{T}\mathbf H^\mathsf{T}\delta \mathbf z^-={\delta \mathbf z^-}^\mathsf{T}\mathbf H$$
+
+我们还知道
+
+$$\frac{\partial \mathbf B^\mathsf{T}\mathbf{AB}}{\partial \mathbf B} = \mathbf B^\mathsf{T}(\mathbf{A} + \mathbf{A}^\mathsf{T})$$
+
+因此第一项变为
+
+$$
+\begin{aligned}
+\frac{\partial}{\partial \mathbf x}{\delta \mathbf x}^\mathsf{T}\mathbf H^\mathsf{T}\mathbf H\delta \mathbf x &= {\delta \mathbf x}^\mathsf{T}(\mathbf H^\mathsf{T}\mathbf H + {\mathbf H^\mathsf{T}\mathbf H}^\mathsf{T})\\
+&= {\delta \mathbf x}^\mathsf{T}(\mathbf H^\mathsf{T}\mathbf H + \mathbf H^\mathsf{T}\mathbf H) \\
+&= 2{\delta \mathbf x}^\mathsf{T}\mathbf H^\mathsf{T}\mathbf H
+\end{aligned}$$
+
+最后，第四项为
+
+$$ \frac{\partial}{\partial \mathbf x}
+{\delta \mathbf z^-}^\mathsf{T}\delta \mathbf z^-=0$$
+
+把这些项代回展开后的偏微分方程，得到
+
+$$
+ 2{\delta \mathbf x}^\mathsf{T}\mathbf H^\mathsf{T}\mathbf H -
+ {\delta \mathbf z^-}^\mathsf{T}\mathbf H - {\delta \mathbf z^-}^\mathsf{T}\mathbf H
+ =0
+$$
+
+$${\delta \mathbf x}^\mathsf{T}\mathbf H^\mathsf{T}\mathbf H -
+ {\delta \mathbf z^-}^\mathsf{T}\mathbf H = 0$$
+
+$${\delta \mathbf x}^\mathsf{T}\mathbf H^\mathsf{T}\mathbf H =
+ {\delta \mathbf z^-}^\mathsf{T}\mathbf H$$
+
+两边同乘以 $(\mathbf H^\mathsf{T}\mathbf H)^{-1}$ 得到
+
+$${\delta \mathbf x}^\mathsf{T} =
+{\delta \mathbf z^-}^\mathsf{T}\mathbf H(\mathbf H^\mathsf{T}\mathbf H)^{-1}$$
+
+两边取转置得到
+
+$$\begin{aligned}
+{\delta \mathbf x} &= ({{\delta \mathbf z^-}^\mathsf{T}\mathbf H(\mathbf H^\mathsf{T}\mathbf H)^{-1}})^\mathsf{T} \\
+&={{(\mathbf H^\mathsf{T}\mathbf H)^{-1}}^T\mathbf H^\mathsf{T} \delta \mathbf z^-} \\
+&={{(\mathbf H^\mathsf{T}\mathbf H)^{-1}}\mathbf H^\mathsf{T} \delta \mathbf z^-}
+\end{aligned}$$
+
+出于各种原因，你可能想让某些测量值的权重大于其他测量值。我们可以用下面的方程来做到这一点
+
+$$ \frac{\partial}{\partial \mathbf x}({\delta \mathbf z}^\mathsf{T}\mathbf{W}\delta \mathbf z) = 0$$
+
+在上面的数学推导中加入 $\mathbf{W}$ 项并重复一遍，得到
+
+$${\delta \mathbf x} = {{(\mathbf H^\mathsf{T}\mathbf{WH})^{-1}}\mathbf H^\mathsf{T}\mathbf{W} \delta \mathbf z^-}
+$$
+=====CELL 9=====
+### 实现迭代最小二乘
+=====CELL 10=====
+我们的目标是实现下式的迭代解
+$${\delta \mathbf x} = {{(\mathbf H^\mathsf{T}\mathbf H)^{-1}}\mathbf H^\mathsf{T} \delta \mathbf z^-}
+$$
+
+首先，我们必须计算 $\mathbf H$，其中 $\mathbf H =  d\mathbf z/d\mathbf x$。为了让例子小一些、结果更容易解释，我们在 2D 中进行。因此对于 $n$ 颗卫星，$\mathbf H$ 展开为
+
+$$\mathbf H = \begin{bmatrix}
+\frac{\partial p_1}{\partial x_1} & \frac{\partial p_1}{\partial y_1} \\
+\frac{\partial p_2}{\partial x_2} & \frac{\partial p_2}{\partial y_2} \\
+\vdots & \vdots \\
+\frac{\partial p_n}{\partial x_n} & \frac{\partial p_n}{\partial y_n}
+\end{bmatrix}$$
+
+我们将用下式计算对 $x$ 的偏导，从而将 $\mathbf H$ 线性化
+
+$$ \frac{estimated\_x\_position - satellite\_x\_position}{estimated\_range\_to\_satellite}$$
+
+$y$ 的方程只需把 $x$ 换成 $y$。
+
+于是算法如下。
+
+    def ILS:
+        guess position
+        while not converged:
+            compute range to satellites for current estimated position
+            compute H linearized at estimated position
+            compute new estimate delta from (H^T H)'H^T dz
+            new estimate = current estimate + estimate delta
+            check for convergence
+
+=====CELL 12=====
+让我们想一想。第一次迭代本质上是在执行线性卡尔曼滤波器在更新步骤中所做的计算：
+
+$$\begin{aligned}
+\mathbf y &= \mathbf z - \mathbf{Hx}\\
+\mathbf x &= \mathbf x + \mathbf{Ky}
+\end{aligned}$$
+
+其中卡尔曼增益等于 1。你可以看到，尽管初始猜测 (900, 90) 非常不准确，计算出的 $\mathbf x$ 的值 (805.4, 205.3) 却非常接近实际值 (800, 200)。不过，它并不完美。但经过三次迭代后，ILS 算法就找到了精确的答案。所以希望你已经清楚，为什么我们使用 ILS 而不是用卡尔曼滤波器来做传感器融合——它给出的结果更好。当然，我们一开始用的是一个非常不准确的猜测；如果猜测更好一些呢？
+=====CELL 14=====
+第一次迭代产生了更好的估计，但通过迭代仍可以进一步改进。
+
+我在测量中没有注入噪声，以便测试并展示该滤波器的理论性能。现在我们来看看注入噪声后它的表现如何。
+=====CELL 16=====
+在这里我们可以看到，噪声意味着我们不再能找到精确解，但我们仍然能够快速收敛到一个比第一次迭代更准确的解。
+
+这远不是对迭代最小二乘算法的完整介绍，更不用说 GNSS 中用于根据 GPS 伪距计算位置的各种方法了。你会在文献中找到许多方法，包括 QR 分解、SVD 以及其他求解超定系统的技术。对于一项非平凡的任务，你需要查阅文献，并根据你特定的传感器配置、噪声大小、精度要求以及你能承受的计算量来设计你自己的算法。
